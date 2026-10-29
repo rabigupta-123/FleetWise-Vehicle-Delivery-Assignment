@@ -1,0 +1,14 @@
+{
+  "endpoint": "PATCH /deliveries/D-002/status -> cancelled",
+  "response_status": 200,
+  "response_body": {
+    "delivery_id": "D-002",
+    "pickup": "Hub C",
+    "dropoff": "Hub D",
+    "scheduled_time": "2026-10-30T11:00:00Z",
+    "priority": "normal",
+    "required_capacity": null,
+    "status": "cancelled",
+    "created_at": "2026-10-29T12:54:32Z"
+  }
+}

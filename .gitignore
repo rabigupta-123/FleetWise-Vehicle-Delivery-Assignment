@@ -1,0 +1,25 @@
+# Environments & local settings
+.env
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# OS generated files
+.DS_Store
+Thumbs.db
+

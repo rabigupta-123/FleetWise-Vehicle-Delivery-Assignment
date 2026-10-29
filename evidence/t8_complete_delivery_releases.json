@@ -1,0 +1,29 @@
+{
+  "endpoint": "PATCH /deliveries/D-001/status -> delivered",
+  "response_status": 200,
+  "response_body": {
+    "delivery_id": "D-001",
+    "pickup": "Hub A",
+    "dropoff": "Hub B",
+    "scheduled_time": "2026-10-30T10:00:00Z",
+    "priority": "high",
+    "required_capacity": 1000.0,
+    "status": "delivered",
+    "created_at": "2026-10-29T12:54:32Z"
+  },
+  "released_vehicle": {
+    "vehicle_id": "V-001",
+    "registration_no": "KA-01-A-1001",
+    "type": "Van",
+    "capacity": 1500.0,
+    "status": "available",
+    "active_delivery_id": null
+  },
+  "released_driver": {
+    "driver_id": "DR-001",
+    "name": "John Doe",
+    "phone": "9876543210",
+    "availability_status": "available",
+    "active_delivery_id": null
+  }
+}

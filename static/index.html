@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FleetWise — Vehicle &amp; Delivery Assignment Control Room</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <div class="app-shell">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar" aria-label="Primary Navigation">
+      <div class="sidebar-brand">
+        <div class="brand-emblem" aria-hidden="true">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">FLEETWISE</span>
+          <span class="brand-tag">DISPATCH OPS // v2.0</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" role="navigation" aria-label="Main Sections">
+        <button type="button" class="nav-item active" data-view="dashboard" aria-current="page">
+          <span class="nav-icon" data-icon="dashboard"></span>
+          <span class="nav-label">Command Center</span>
+          <kbd class="nav-kbd">1</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="deliveries">
+          <span class="nav-icon" data-icon="package"></span>
+          <span class="nav-label">Deliveries</span>
+          <span class="nav-badge" id="nav-badge-deliveries">0</span>
+        </button>
+        <button type="button" class="nav-item" data-view="dispatch">
+          <span class="nav-icon" data-icon="dispatch"></span>
+          <span class="nav-label">Dispatch Console</span>
+          <span class="nav-badge nav-badge-accent" id="nav-badge-pending">0</span>
+        </button>
+        <button type="button" class="nav-item" data-view="fleet">
+          <span class="nav-icon" data-icon="truck"></span>
+          <span class="nav-label">Fleet Vehicles</span>
+          <span class="nav-badge" id="nav-badge-fleet">0</span>
+        </button>
+        <button type="button" class="nav-item" data-view="drivers">
+          <span class="nav-icon" data-icon="users"></span>
+          <span class="nav-label">Drivers</span>
+          <span class="nav-badge" id="nav-badge-drivers">0</span>
+        </button>
+        <button type="button" class="nav-item" data-view="import">
+          <span class="nav-icon" data-icon="upload"></span>
+          <span class="nav-label">Import Data</span>
+          <kbd class="nav-kbd">I</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="racelab">
+          <span class="nav-icon" data-icon="zap"></span>
+          <span class="nav-label">Race Lab (Proof)</span>
+          <kbd class="nav-kbd">L</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="analytics">
+          <span class="nav-icon" data-icon="activity"></span>
+          <span class="nav-label">Analytics</span>
+          <kbd class="nav-kbd">Y</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="routes">
+          <span class="nav-icon" data-icon="navigation"></span>
+          <span class="nav-label">Route Radar</span>
+          <kbd class="nav-kbd">M</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="audit">
+          <span class="nav-icon" data-icon="audit"></span>
+          <span class="nav-label">Audit Log</span>
+          <kbd class="nav-kbd">A</kbd>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="guard-indicator">
+          <span class="guard-dot" aria-hidden="true"></span>
+          <div>
+            <div class="guard-title">ATOMIC DB GUARD</div>
+            <div class="guard-sub">BEGIN IMMEDIATE + WAL</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="main-wrapper">
+      <!-- Top Header -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <button type="button" class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle navigation menu" aria-expanded="false">
+            <span data-icon="menu"></span>
+          </button>
+          <div>
+            <h1 class="page-title" id="page-title">Command Center</h1>
+            <p class="page-subtitle" id="page-subtitle">Real-time fleet telemetry, active delivery lanes &amp; conflict-free resource allocation</p>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <!-- Real-Time SSE Indicator -->
+          <div class="telemetry-pill" id="sse-pill" role="status" aria-live="polite" title="Real-time Server-Sent Events stream with polling fallback">
+            <span class="telemetry-dot" id="telemetry-dot" aria-hidden="true"></span>
+            <span class="telemetry-text" id="telemetry-status">LIVE SSE</span>
+            <span class="telemetry-time" id="telemetry-time">--:--:--</span>
+          </div>
+
+          <!-- Theme Toggle -->
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-theme-toggle" aria-label="Toggle dark / light theme" title="Toggle Theme (Dark / Light)">
+            <span data-icon="wrench" id="theme-icon"></span>
+            <span class="hide-sm" id="theme-label">Theme</span>
+          </button>
+
+          <!-- Shortcuts Dialog Trigger -->
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-shortcuts" aria-label="View keyboard shortcuts (?)" title="Keyboard shortcuts (?)">
+            <kbd class="kbd-hint">?</kbd>
+          </button>
+
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-refresh-now" aria-label="Refresh data now">
+            <span data-icon="refresh"></span>
+            <span class="hide-sm">Sync</span>
+          </button>
+
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-cmd-palette" aria-label="Open Command Palette (Ctrl+K)">
+            <span data-icon="search"></span>
+            <span class="hide-sm">Command</span>
+            <kbd class="kbd-hint">Ctrl+K</kbd>
+          </button>
+
+          <button type="button" class="btn btn-primary btn-sm" id="btn-quick-dispatch">
+            <span data-icon="dispatch"></span>
+            <span>Dispatch</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Global Verbatim Server Error Banner -->
+      <div id="global-error-banner" class="server-error-banner hidden" role="alert" aria-live="assertive" tabindex="-1">
+        <div class="server-error-content">
+          <span class="server-error-icon" data-icon="shieldAlert"></span>
+          <div class="server-error-text">
+            <span class="server-error-code" id="global-error-code">ERROR</span>
+            <span class="server-error-message" id="global-error-message"></span>
+          </div>
+        </div>
+        <button type="button" class="icon-btn" id="btn-dismiss-error" aria-label="Dismiss error banner">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+
+      <!-- Main Viewport -->
+      <main id="main-content" class="viewport" tabindex="-1">
+        <!-- ==================== VIEW 1: COMMAND CENTER ==================== -->
+        <section id="view-dashboard" class="view-section active" aria-labelledby="page-title">
+          <!-- Bento KPI Row -->
+          <div class="bento-grid">
+            <article class="kpi-card" aria-label="Available Fleet">
+              <div class="kpi-header">
+                <span class="kpi-label">AVAILABLE FLEET</span>
+                <span class="kpi-icon kpi-icon-success" data-icon="truck"></span>
+              </div>
+              <div class="kpi-value-row">
+                <span class="kpi-value tabular" id="kpi-available-fleet">0</span>
+                <span class="kpi-sub tabular" id="kpi-fleet-breakdown">/ 0 total vehicles</span>
+              </div>
+              <div class="kpi-meta" id="kpi-fleet-detail">0 assigned · 0 maintenance</div>
+            </article>
+
+            <article class="kpi-card" aria-label="Active Deliveries">
+              <div class="kpi-header">
+                <span class="kpi-label">ACTIVE DELIVERIES</span>
+                <span class="kpi-icon kpi-icon-info" data-icon="navigation"></span>
+              </div>
+              <div class="kpi-value-row">
+                <span class="kpi-value tabular" id="kpi-active-deliveries">0</span>
+                <span class="kpi-sub tabular" id="kpi-pending-count">0 pending</span>
+              </div>
+              <div class="kpi-meta" id="kpi-active-detail">Assigned + In Transit (blocking)</div>
+            </article>
+
+            <article class="kpi-card" aria-label="Completed Deliveries">
+              <div class="kpi-header">
+                <span class="kpi-label">DELIVERED COUNT</span>
+                <span class="kpi-icon kpi-icon-primary" data-icon="checkCircle"></span>
+              </div>
+              <div class="kpi-value-row">
+                <span class="kpi-value tabular" id="kpi-delivered-count">0</span>
+                <span class="kpi-sub tabular" id="kpi-cancelled-count">0 cancelled</span>
+              </div>
+              <div class="kpi-meta">Resources released &amp; non-blocking</div>
+            </article>
+
+            <article class="kpi-card kpi-card-ring" aria-label="Fleet Utilisation Percentage">
+              <div class="ring-container">
+                <svg class="utilisation-ring" viewBox="0 0 80 80" role="img" aria-label="Fleet utilisation gauge">
+                  <circle class="ring-track" cx="40" cy="40" r="32" />
+                  <circle class="ring-fill" id="kpi-ring-circle" cx="40" cy="40" r="32" stroke-dasharray="201.06" stroke-dashoffset="201.06" />
+                </svg>
+                <div class="ring-center tabular" id="kpi-utilisation-pct">0%</div>
+              </div>
+              <div class="ring-info">
+                <span class="kpi-label">FLEET UTILISATION</span>
+                <div class="kpi-meta" id="kpi-driver-summary">0 / 0 drivers available</div>
+                <div class="utilisation-zone-badge" id="kpi-utilisation-zone">IDLE ZONE (0%)</div>
+              </div>
+            </article>
+          </div>
+
+          <!-- Empty State Callout -->
+          <div id="dashboard-empty-state" class="empty-state-panel hidden">
+            <div class="empty-state-icon" data-icon="upload"></div>
+            <h2 class="empty-state-title">Database is Empty — Ready for Operations Data</h2>
+            <p class="empty-state-desc">
+              FleetWise starts with zero pre-seeded data. Import your vehicles, drivers, and deliveries via CSV or JSON, or create records manually to begin conflict-free dispatch.
+            </p>
+            <div class="empty-state-actions">
+              <button type="button" class="btn btn-primary" data-goto-view="import">
+                <span data-icon="upload"></span>
+                <span>Go to Import Data Page</span>
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-empty-create-vehicle">
+                <span data-icon="plus"></span>
+                <span>Create Vehicle Manually</span>
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-empty-create-delivery">
+                <span data-icon="plus"></span>
+                <span>Create Delivery Manually</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 4-Lane Live Status Board -->
+          <div class="section-header">
+            <div class="section-title-group">
+              <h2 class="section-title">LIVE OPERATIONS BOARD</h2>
+              <span class="section-pill">Active = Assigned | In Transit</span>
+            </div>
+            <div class="section-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-dash-new-delivery">
+                <span data-icon="plus"></span>
+                <span>New Delivery</span>
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm" data-goto-view="import">
+                <span data-icon="upload"></span>
+                <span>Import CSV/JSON</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="lanes-grid" id="lanes-board">
+            <div class="lane-column" data-lane="pending">
+              <div class="lane-header">
+                <span class="status-badge status-pending">
+                  <span data-icon="clock"></span>
+                  <span>PENDING</span>
+                </span>
+                <span class="lane-count tabular" id="lane-count-pending">0</span>
+              </div>
+              <div class="lane-body" id="lane-body-pending"></div>
+            </div>
+
+            <div class="lane-column" data-lane="assigned">
+              <div class="lane-header">
+                <span class="status-badge status-assigned">
+                  <span data-icon="link"></span>
+                  <span>ASSIGNED (ACTIVE)</span>
+                </span>
+                <span class="lane-count tabular" id="lane-count-assigned">0</span>
+              </div>
+              <div class="lane-body" id="lane-body-assigned"></div>
+            </div>
+
+            <div class="lane-column" data-lane="in_transit">
+              <div class="lane-header">
+                <span class="status-badge status-in_transit">
+                  <span data-icon="navigation"></span>
+                  <span>IN TRANSIT (ACTIVE)</span>
+                </span>
+                <span class="lane-count tabular" id="lane-count-in_transit">0</span>
+              </div>
+              <div class="lane-body" id="lane-body-in_transit"></div>
+            </div>
+
+            <div class="lane-column" data-lane="delivered">
+              <div class="lane-header">
+                <span class="status-badge status-delivered">
+                  <span data-icon="checkCircle"></span>
+                  <span>DELIVERED</span>
+                </span>
+                <span class="lane-count tabular" id="lane-count-delivered">0</span>
+              </div>
+              <div class="lane-body" id="lane-body-delivered"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 2: DELIVERIES ==================== -->
+        <section id="view-deliveries" class="view-section" aria-label="Deliveries Management">
+          <div class="toolbar-panel">
+            <div class="filter-group" role="group" aria-label="Filter deliveries by status">
+              <button type="button" class="filter-chip active" data-delivery-status="">All</button>
+              <button type="button" class="filter-chip" data-delivery-status="pending">Pending</button>
+              <button type="button" class="filter-chip" data-delivery-status="assigned">Assigned</button>
+              <button type="button" class="filter-chip" data-delivery-status="in_transit">In Transit</button>
+              <button type="button" class="filter-chip" data-delivery-status="delivered">Delivered</button>
+              <button type="button" class="filter-chip" data-delivery-status="cancelled">Cancelled</button>
+            </div>
+
+            <div class="toolbar-right">
+              <div class="search-input-wrap">
+                <span class="search-icon" data-icon="search"></span>
+                <input
+                  type="search"
+                  id="deliveries-search"
+                  class="input input-sm"
+                  placeholder="Search ID, pickup, dropoff..."
+                  aria-label="Search deliveries"
+                />
+              </div>
+              <a href="/export/deliveries.csv" class="btn btn-ghost btn-sm" download="fleetwise_deliveries.csv" title="Formula-injection safe CSV export">
+                <span data-icon="download"></span>
+                <span>Export CSV</span>
+              </a>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="window.print()">
+                <span data-icon="fileText"></span>
+                <span>Print Sheet</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-open-delivery-modal">
+                <span data-icon="plus"></span>
+                <span>New Delivery</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-card">
+            <div class="table-responsive">
+              <table class="data-table" aria-label="Deliveries Table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Pickup &rarr; Dropoff</th>
+                    <th>Scheduled &bull; SLA Countdown</th>
+                    <th>Priority</th>
+                    <th>Req. Cap</th>
+                    <th>Status</th>
+                    <th>Active Assignment</th>
+                    <th class="text-right">Lifecycle Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="deliveries-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 3: DISPATCH CONSOLE (WITH SMART ADVISOR & BLOCKED QUEUE) ==================== -->
+        <section id="view-dispatch" class="view-section" aria-label="Dispatch Assignment Console">
+          <!-- Top Dispatch Banner with Advisor & Auto-Assign -->
+          <div class="dispatch-advisor-bar">
+            <div class="advisor-title-wrap">
+              <span class="step-tag">SMART DISPATCH ADVISOR</span>
+              <h2 class="panel-title">Automated Fleet Allocation &amp; Blocked Queue Radar</h2>
+            </div>
+            <div class="advisor-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-dispatch-next">
+                <span data-icon="zap"></span>
+                <span>Dispatch Next (Highest Priority)</span>
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-view-blocked-queue">
+                <span data-icon="alertTriangle"></span>
+                <span id="blocked-queue-btn-label">Blocked Queue (0)</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-auto-assign-all">
+                <span data-icon="checkCircle"></span>
+                <span>Auto-Assign All (Batch)</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="dispatch-grid">
+            <!-- Step 1: Select Pending Delivery -->
+            <div class="dispatch-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="step-tag">STEP 01</span>
+                  <h2 class="panel-title">Select Pending Delivery</h2>
+                </div>
+                <span class="badge-count tabular" id="dispatch-pending-count">0 pending</span>
+              </div>
+              <div class="panel-body" id="dispatch-delivery-list"></div>
+            </div>
+
+            <!-- Step 2 & 3: Select Vehicle & Driver + Assign -->
+            <div class="dispatch-panel dispatch-panel-wide">
+              <div class="panel-header">
+                <div>
+                  <span class="step-tag">STEP 02</span>
+                  <h2 class="panel-title">Allocate Eligible Vehicle &amp; Driver</h2>
+                </div>
+                <label class="guard-bypass-toggle" title="Unlocks disabled options in the UI so you can verify that the backend BEGIN IMMEDIATE transaction rejects occupied/unavailable resources with 409.">
+                  <input type="checkbox" id="toggle-server-guard-test" />
+                  <span>Allow selecting ineligible resources (Test Server 409 Guard)</span>
+                </label>
+              </div>
+
+              <!-- Verbatim Dispatch Error Summary -->
+              <div id="dispatch-error-box" class="form-error-summary hidden" role="alert" tabindex="-1">
+                <div class="error-summary-header">
+                  <span data-icon="alertTriangle"></span>
+                  <strong id="dispatch-error-code">ASSIGNMENT_REJECTED</strong>
+                </div>
+                <p id="dispatch-error-msg" class="error-summary-body"></p>
+              </div>
+
+              <div id="dispatch-selected-banner" class="selected-delivery-banner">
+                Select a pending delivery on the left to inspect resource eligibility.
+              </div>
+
+              <!-- Advisor Recommended Pair Box -->
+              <div id="advisor-rec-card" class="advisor-rec-card hidden">
+                <div class="advisor-rec-header">
+                  <div class="advisor-rec-title">
+                    <span data-icon="zap"></span>
+                    <span>ADVISOR TOP RECOMMENDATION</span>
+                  </div>
+                  <span class="advisor-rec-score" id="advisor-top-score">100% MATCH</span>
+                </div>
+                <div class="advisor-rec-body" id="advisor-top-reason">
+                  Smallest sufficient capacity vehicle and fairest driver idle time.
+                </div>
+                <button type="button" class="btn btn-secondary btn-xs mt-sm" id="btn-apply-advisor">
+                  <span>Apply Recommended Pair</span>
+                </button>
+              </div>
+
+              <div class="resource-columns">
+                <div class="resource-col">
+                  <h3 class="resource-col-title">
+                    <span data-icon="truck"></span>
+                    <span>Vehicles</span>
+                  </h3>
+                  <div class="resource-list" id="dispatch-vehicle-list" role="radiogroup" aria-label="Select Vehicle"></div>
+                </div>
+
+                <div class="resource-col">
+                  <h3 class="resource-col-title">
+                    <span data-icon="users"></span>
+                    <span>Drivers</span>
+                  </h3>
+                  <div class="resource-list" id="dispatch-driver-list" role="radiogroup" aria-label="Select Driver"></div>
+                </div>
+              </div>
+
+              <div class="dispatch-footer">
+                <div class="dispatch-selection-summary" id="dispatch-selection-summary">
+                  Delivery: <code id="sum-delivery">None</code> &bull;
+                  Vehicle: <code id="sum-vehicle">None</code> &bull;
+                  Driver: <code id="sum-driver">None</code>
+                </div>
+                <button type="button" class="btn btn-primary" id="btn-submit-assign" disabled>
+                  <span data-icon="zap"></span>
+                  <span>Confirm Atomic Assignment</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 4: FLEET VEHICLES ==================== -->
+        <section id="view-fleet" class="view-section" aria-label="Fleet Vehicles">
+          <div class="toolbar-panel">
+            <div class="search-input-wrap">
+              <span class="search-icon" data-icon="search"></span>
+              <input
+                type="search"
+                id="fleet-search"
+                class="input input-sm"
+                placeholder="Search vehicle ID, registration, type..."
+                aria-label="Search vehicles"
+              />
+            </div>
+            <div class="toolbar-right">
+              <a href="/export/vehicles.csv" class="btn btn-ghost btn-sm" download="fleetwise_vehicles.csv">
+                <span data-icon="download"></span>
+                <span>Export CSV</span>
+              </a>
+              <button type="button" class="btn btn-secondary btn-sm" data-goto-view="import">
+                <span data-icon="upload"></span>
+                <span>Import Vehicles</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-open-vehicle-modal">
+                <span data-icon="plus"></span>
+                <span>Add Vehicle</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-card">
+            <div class="table-responsive">
+              <table class="data-table" aria-label="Fleet Vehicles Table">
+                <thead>
+                  <tr>
+                    <th>Vehicle ID</th>
+                    <th>Registration No</th>
+                    <th>Type</th>
+                    <th>Capacity (kg)</th>
+                    <th>Status</th>
+                    <th>Active Delivery</th>
+                    <th class="text-right">Manual Status Control</th>
+                  </tr>
+                </thead>
+                <tbody id="fleet-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 5: DRIVERS ==================== -->
+        <section id="view-drivers" class="view-section" aria-label="Drivers Directory">
+          <div class="toolbar-panel">
+            <div class="search-input-wrap">
+              <span class="search-icon" data-icon="search"></span>
+              <input
+                type="search"
+                id="drivers-search"
+                class="input input-sm"
+                placeholder="Search driver ID, name, phone..."
+                aria-label="Search drivers"
+              />
+            </div>
+            <div class="toolbar-right">
+              <a href="/export/drivers.csv" class="btn btn-ghost btn-sm" download="fleetwise_drivers.csv">
+                <span data-icon="download"></span>
+                <span>Export CSV</span>
+              </a>
+              <button type="button" class="btn btn-secondary btn-sm" data-goto-view="import">
+                <span data-icon="upload"></span>
+                <span>Import Drivers</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-open-driver-modal">
+                <span data-icon="plus"></span>
+                <span>Add Driver</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-card">
+            <div class="table-responsive">
+              <table class="data-table" aria-label="Drivers Table">
+                <thead>
+                  <tr>
+                    <th>Driver ID</th>
+                    <th>Full Name</th>
+                    <th>Phone</th>
+                    <th>Availability Status</th>
+                    <th>Active Delivery</th>
+                    <th class="text-right">Manual Availability Control</th>
+                  </tr>
+                </thead>
+                <tbody id="drivers-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 6: IMPORT DATA ==================== -->
+        <section id="view-import" class="view-section" aria-label="Import Data Pipeline">
+          <div class="import-layout">
+            <div class="import-config-card">
+              <h2 class="panel-title">1. Select Target Entity &amp; Template</h2>
+              <p class="panel-desc">
+                All imports run a server-side validation dry-run first. Imports never create <code>assigned</code> or <code>in_transit</code> states; deliveries always enter as <code>pending</code>.
+              </p>
+
+              <div class="entity-selector" role="radiogroup" aria-label="Import Entity Type">
+                <button type="button" class="entity-tab active" data-import-entity="vehicles" role="radio" aria-checked="true">
+                  <span data-icon="truck"></span>
+                  <span>Vehicles</span>
+                </button>
+                <button type="button" class="entity-tab" data-import-entity="drivers" role="radio" aria-checked="false">
+                  <span data-icon="users"></span>
+                  <span>Drivers</span>
+                </button>
+                <button type="button" class="entity-tab" data-import-entity="deliveries" role="radio" aria-checked="false">
+                  <span data-icon="package"></span>
+                  <span>Deliveries</span>
+                </button>
+              </div>
+
+              <div class="template-box">
+                <div class="template-meta">
+                  <span class="template-label">Expected Columns:</span>
+                  <code id="import-expected-cols">vehicle_id (opt), registration_no, type, capacity, status (opt)</code>
+                </div>
+                <a
+                  id="link-download-template"
+                  href="/import/templates/vehicles.csv"
+                  download="vehicles_template.csv"
+                  class="btn btn-secondary btn-sm"
+                >
+                  <span data-icon="download"></span>
+                  <span>Download CSV Template</span>
+                </a>
+              </div>
+
+              <h2 class="panel-title mt-lg">2. Upload CSV or JSON File</h2>
+              <div
+                id="dropzone"
+                class="dropzone"
+                tabindex="0"
+                role="button"
+                aria-label="Upload CSV or JSON file by clicking or dragging and dropping"
+              >
+                <input type="file" id="import-file-input" accept=".csv,.json,text/csv,application/json" class="sr-only" />
+                <div class="dropzone-icon" data-icon="upload"></div>
+                <div class="dropzone-title" id="dropzone-filename">Drag &amp; drop a .csv or .json file here, or click to browse</div>
+                <div class="dropzone-sub">Automatically runs <code>POST /import/{entity}?dry_run=true</code> on selection (Max 5MB, 5000 rows)</div>
+              </div>
+            </div>
+
+            <!-- Dry-Run & Commit Preview Panel -->
+            <div class="import-preview-card">
+              <div class="panel-header">
+                <div>
+                  <h2 class="panel-title">3. Server Dry-Run Preview &amp; Atomic Commit</h2>
+                  <p class="panel-desc" id="import-preview-subtitle">Upload a file to inspect per-row validation results before committing.</p>
+                </div>
+                <div class="import-actions">
+                  <button type="button" class="btn btn-secondary btn-sm hidden" id="btn-download-error-csv">
+                    <span data-icon="download"></span>
+                    <span>Download Error Report (CSV)</span>
+                  </button>
+                  <button type="button" class="btn btn-primary btn-sm" id="btn-commit-import" disabled>
+                    <span data-icon="checkCircle"></span>
+                    <span>Commit Import (All-or-Nothing)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div id="import-summary-banner" class="import-summary-banner hidden" role="status" aria-live="polite"></div>
+
+              <div class="table-responsive">
+                <table class="data-table" aria-label="Import Preview Table">
+                  <thead id="import-preview-thead">
+                    <tr>
+                      <th>Row #</th>
+                      <th>Validation Status</th>
+                      <th>Record Preview</th>
+                      <th>Error Details (Field &amp; Reason)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="import-preview-tbody">
+                    <tr>
+                      <td colspan="4" class="empty-cell">No file loaded yet.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 7: RACE LAB (CONCURRENCY PROOF - B4) ==================== -->
+        <section id="view-racelab" class="view-section" aria-label="Race Lab Concurrency Diagnostic Proof">
+          <div class="racelab-card">
+            <div class="racelab-header">
+              <div>
+                <span class="step-tag">JUDGE-FACING PROOF OF CORE INVARIANT</span>
+                <h2 class="panel-title">Parallel Allocation Race Lab</h2>
+                <p class="panel-desc">Dispatches N concurrent assignment attempts against an isolated temporary database to prove zero race conditions and zero double assignments.</p>
+              </div>
+              <div class="racelab-controls">
+                <label for="racelab-workers">Parallel Workers:</label>
+                <select id="racelab-workers" class="input input-sm" style="width:90px;">
+                  <option value="10">10</option>
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                </select>
+                <button type="button" class="btn btn-primary" id="btn-launch-racelab">
+                  <span data-icon="zap"></span>
+                  <span>Launch Race Test</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="racelab-results-panel" class="racelab-results-panel hidden">
+              <div class="bento-grid">
+                <div class="kpi-card">
+                  <span class="kpi-label">TOTAL WORKERS</span>
+                  <div class="kpi-value tabular" id="rl-workers">0</div>
+                  <div class="kpi-meta">Parallel threads</div>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">SUCCESS (201 CREATED)</span>
+                  <div class="kpi-value tabular" style="color:var(--status-success-fg);" id="rl-success">0</div>
+                  <div class="kpi-meta">Exactly 1 winner</div>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">CONFLICTS (409 REJECTED)</span>
+                  <div class="kpi-value tabular" style="color:var(--status-warning-fg);" id="rl-conflicts">0</div>
+                  <div class="kpi-meta">All others blocked</div>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">SERVER ERRORS (5xx)</span>
+                  <div class="kpi-value tabular" id="rl-errors">0</div>
+                  <div class="kpi-meta">Zero database lockouts</div>
+                </div>
+              </div>
+
+              <div class="racelab-timeline" id="racelab-timeline"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 8: ANALYTICS (SVG CHARTS - B6) ==================== -->
+        <section id="view-analytics" class="view-section" aria-label="Analytics &amp; Performance Radar">
+          <div class="bento-grid">
+            <div class="kpi-card" style="grid-column: span 6;">
+              <h2 class="panel-title">On-Time Delivery Performance</h2>
+              <div id="chart-ontime" class="svg-chart-container"></div>
+            </div>
+            <div class="kpi-card" style="grid-column: span 6;">
+              <h2 class="panel-title">Delivery Status Funnel</h2>
+              <div id="chart-funnel" class="svg-chart-container"></div>
+            </div>
+            <div class="kpi-card" style="grid-column: span 12;">
+              <h2 class="panel-title">Driver Workload Distribution (Completed Trips)</h2>
+              <div id="chart-workload" class="svg-chart-container"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 9: ROUTE RADAR (B7) ==================== -->
+        <section id="view-routes" class="view-section" aria-label="Route Radar Canvas">
+          <div class="table-card" style="padding:var(--space-xl);">
+            <div class="panel-header">
+              <div>
+                <h2 class="panel-title">Active Delivery Route Canvas</h2>
+                <p class="panel-desc">Visualizes pickup and dropoff points and route trajectories for active assignments.</p>
+              </div>
+            </div>
+            <div class="route-canvas-wrap">
+              <svg id="route-svg-canvas" viewBox="0 0 1000 500" class="route-svg"></svg>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 10: AUDIT LOG ==================== -->
+        <section id="view-audit" class="view-section" aria-label="System Audit Log">
+          <div class="toolbar-panel">
+            <div>
+              <h2 class="section-title">IMMUTABLE TRANSACTION AUDIT TRAIL</h2>
+              <p class="panel-desc">Every create, import, assignment, and lifecycle state change is recorded inside the same SQLite transaction.</p>
+            </div>
+            <div class="toolbar-right">
+              <a href="/export/audit.csv" class="btn btn-ghost btn-sm" download="fleetwise_audit.csv">
+                <span data-icon="download"></span>
+                <span>Export Audit CSV</span>
+              </a>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-audit">
+                <span data-icon="refresh"></span>
+                <span>Refresh Log</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-card">
+            <div class="table-responsive">
+              <table class="data-table" aria-label="Audit Log Table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Timestamp (UTC)</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Entity</th>
+                    <th>Entity ID</th>
+                    <th>Before State</th>
+                    <th>After State</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ==================== MODALS ==================== -->
+  <!-- Create Vehicle Modal -->
+  <div class="modal-backdrop hidden" id="modal-vehicle" role="dialog" aria-modal="true" aria-labelledby="modal-vehicle-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-vehicle-title">Register Fleet Vehicle</h2>
+        <button type="button" class="icon-btn" data-close-modal="modal-vehicle" aria-label="Close modal">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <form id="form-vehicle" novalidate>
+        <div id="form-vehicle-errors" class="form-error-summary hidden" role="alert" tabindex="-1"></div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="veh-id">Vehicle ID <span class="field-hint">(Optional, auto V-###)</span></label>
+            <input type="text" id="veh-id" name="vehicle_id" class="input" placeholder="e.g. V-101" />
+          </div>
+          <div class="form-field">
+            <label for="veh-reg">Registration No <span class="req">*</span></label>
+            <input type="text" id="veh-reg" name="registration_no" class="input" placeholder="e.g. KA-01-AB-1234" required />
+          </div>
+          <div class="form-field">
+            <label for="veh-type">Vehicle Type <span class="req">*</span></label>
+            <input type="text" id="veh-type" name="type" class="input" placeholder="e.g. Refrigerated Van, Heavy Truck" required />
+          </div>
+          <div class="form-field">
+            <label for="veh-cap">Capacity (kg) <span class="req">*</span></label>
+            <input type="number" id="veh-cap" name="capacity" class="input" step="1" min="1" placeholder="e.g. 1500" required />
+          </div>
+          <div class="form-field form-field-full">
+            <label for="veh-status">Initial Status</label>
+            <select id="veh-status" name="status" class="input">
+              <option value="available">available</option>
+              <option value="maintenance">maintenance</option>
+              <option value="inactive">inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal="modal-vehicle">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Vehicle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Driver Modal -->
+  <div class="modal-backdrop hidden" id="modal-driver" role="dialog" aria-modal="true" aria-labelledby="modal-driver-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-driver-title">Register Driver</h2>
+        <button type="button" class="icon-btn" data-close-modal="modal-driver" aria-label="Close modal">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <form id="form-driver" novalidate>
+        <div id="form-driver-errors" class="form-error-summary hidden" role="alert" tabindex="-1"></div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="drv-id">Driver ID <span class="field-hint">(Optional, auto DR-###)</span></label>
+            <input type="text" id="drv-id" name="driver_id" class="input" placeholder="e.g. DR-101" />
+          </div>
+          <div class="form-field">
+            <label for="drv-name">Full Name <span class="req">*</span></label>
+            <input type="text" id="drv-name" name="name" class="input" placeholder="e.g. Aarav Sharma" required />
+          </div>
+          <div class="form-field">
+            <label for="drv-phone">Phone Number <span class="req">*</span></label>
+            <input type="text" id="drv-phone" name="phone" class="input" placeholder="e.g. +91-9876543210" required />
+          </div>
+          <div class="form-field">
+            <label for="drv-status">Initial Availability</label>
+            <select id="drv-status" name="availability_status" class="input">
+              <option value="available">available</option>
+              <option value="unavailable">unavailable</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal="modal-driver">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Driver</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Delivery Modal -->
+  <div class="modal-backdrop hidden" id="modal-delivery" role="dialog" aria-modal="true" aria-labelledby="modal-delivery-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-delivery-title">Create Delivery Order</h2>
+        <button type="button" class="icon-btn" data-close-modal="modal-delivery" aria-label="Close modal">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <form id="form-delivery" novalidate>
+        <div id="form-delivery-errors" class="form-error-summary hidden" role="alert" tabindex="-1"></div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="del-id">Delivery ID <span class="field-hint">(Optional, auto D-###)</span></label>
+            <input type="text" id="del-id" name="delivery_id" class="input" placeholder="e.g. D-101" />
+          </div>
+          <div class="form-field">
+            <label for="del-priority">Priority <span class="req">*</span></label>
+            <select id="del-priority" name="priority" class="input">
+              <option value="normal" selected>normal</option>
+              <option value="low">low</option>
+              <option value="high">high</option>
+              <option value="urgent">urgent</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="del-pickup">Pickup Location <span class="req">*</span></label>
+            <input type="text" id="del-pickup" name="pickup" class="input" placeholder="e.g. Central Hub Sector 4" required />
+          </div>
+          <div class="form-field">
+            <label for="del-dropoff">Dropoff Location <span class="req">*</span></label>
+            <input type="text" id="del-dropoff" name="dropoff" class="input" placeholder="e.g. Terminal B Cold Storage" required />
+          </div>
+          <div class="form-field">
+            <label for="del-time">Scheduled Time (ISO 8601) <span class="req">*</span></label>
+            <input type="text" id="del-time" name="scheduled_time" class="input" placeholder="2026-10-30T10:00:00Z" required />
+          </div>
+          <div class="form-field">
+            <label for="del-cap">Required Capacity (kg) <span class="field-hint">(Optional)</span></label>
+            <input type="number" id="del-cap" name="required_capacity" class="input" step="1" min="1" placeholder="e.g. 500" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal="modal-delivery">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Pending Delivery</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Blocked Queue Modal (B2) -->
+  <div class="modal-backdrop hidden" id="modal-blocked-queue" role="dialog" aria-modal="true" aria-labelledby="modal-blocked-title">
+    <div class="modal-dialog" style="max-width:680px;">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-blocked-title">Blocked Queue Diagnostics</h2>
+        <button type="button" class="icon-btn" data-close-modal="modal-blocked-queue" aria-label="Close modal">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <div style="padding:var(--space-xl); max-height:420px; overflow-y:auto;" id="blocked-queue-list">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Dialog (?) -->
+  <div class="modal-backdrop hidden" id="modal-shortcuts" role="dialog" aria-modal="true" aria-labelledby="modal-shortcuts-title">
+    <div class="modal-dialog" style="max-width:480px;">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-shortcuts-title">Keyboard Shortcuts</h2>
+        <button type="button" class="icon-btn" data-close-modal="modal-shortcuts" aria-label="Close modal">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <div style="padding:var(--space-xl); display:flex; flex-direction:column; gap:10px;">
+        <div class="cmd-item"><span>Command Palette</span><kbd class="kbd-hint">Ctrl + K</kbd></div>
+        <div class="cmd-item"><span>Command Center</span><kbd class="kbd-hint">1</kbd></div>
+        <div class="cmd-item"><span>Deliveries Management</span><kbd class="kbd-hint">2</kbd></div>
+        <div class="cmd-item"><span>Dispatch Console</span><kbd class="kbd-hint">3</kbd></div>
+        <div class="cmd-item"><span>Fleet Vehicles</span><kbd class="kbd-hint">4</kbd></div>
+        <div class="cmd-item"><span>Drivers Directory</span><kbd class="kbd-hint">5</kbd></div>
+        <div class="cmd-item"><span>Import Data</span><kbd class="kbd-hint">I</kbd></div>
+        <div class="cmd-item"><span>Race Lab</span><kbd class="kbd-hint">L</kbd></div>
+        <div class="cmd-item"><span>Analytics</span><kbd class="kbd-hint">Y</kbd></div>
+        <div class="cmd-item"><span>Route Radar</span><kbd class="kbd-hint">M</kbd></div>
+        <div class="cmd-item"><span>Audit Log</span><kbd class="kbd-hint">A</kbd></div>
+        <div class="cmd-item"><span>Close Modals</span><kbd class="kbd-hint">ESC</kbd></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command Palette (Ctrl+K) -->
+  <div class="modal-backdrop hidden" id="modal-cmd" role="dialog" aria-modal="true" aria-labelledby="cmd-palette-label">
+    <div class="modal-dialog cmd-dialog">
+      <div class="cmd-input-row">
+        <span data-icon="search"></span>
+        <input
+          type="text"
+          id="cmd-input"
+          class="cmd-input"
+          placeholder="Type a command or jump to screen..."
+          aria-labelledby="cmd-palette-label"
+        />
+        <span id="cmd-palette-label" class="sr-only">Command Palette</span>
+        <kbd class="kbd-hint">ESC</kbd>
+      </div>
+      <div class="cmd-list" id="cmd-list" role="listbox"></div>
+    </div>
+  </div>
+
+  <!-- Toast Stack -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

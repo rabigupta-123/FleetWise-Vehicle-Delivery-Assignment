@@ -1,0 +1,23 @@
+{
+  "unknown_delivery": {
+    "status": 404,
+    "body": {
+      "error": "NOT_FOUND",
+      "message": "Delivery 'D-999' does not exist."
+    }
+  },
+  "unknown_vehicle": {
+    "status": 404,
+    "body": {
+      "error": "NOT_FOUND",
+      "message": "Vehicle 'V-999' does not exist."
+    }
+  },
+  "unknown_driver": {
+    "status": 404,
+    "body": {
+      "error": "NOT_FOUND",
+      "message": "Driver 'DR-999' does not exist."
+    }
+  }
+}

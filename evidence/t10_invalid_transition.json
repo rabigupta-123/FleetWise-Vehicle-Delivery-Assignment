@@ -1,0 +1,8 @@
+{
+  "endpoint": "PATCH /deliveries/D-004/status (pending -> delivered)",
+  "response_status": 409,
+  "response_body": {
+    "error": "INVALID_TRANSITION",
+    "message": "Transition from 'pending' to 'delivered' is not permitted. (Allowed: cancelled)"
+  }
+}

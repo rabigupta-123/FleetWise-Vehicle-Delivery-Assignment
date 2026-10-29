@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /deliveries/D-003/assign",
+  "request_payload": {
+    "vehicle_id": "V-MAINT",
+    "driver_id": "DR-002"
+  },
+  "response_status": 409,
+  "response_body": {
+    "error": "VEHICLE_UNAVAILABLE",
+    "message": "Vehicle 'V-MAINT' is in status 'maintenance'"
+  }
+}

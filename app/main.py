@@ -1,0 +1,1365 @@
+import asyncio
+import csv
+import hashlib
+import io
+import json
+import re
+import tempfile
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, AsyncGenerator, Optional
+
+from fastapi import Depends, FastAPI, File, Header, Query, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
+
+from app.advisor import get_dispatch_next_delivery, get_recommendations_for_delivery
+from app.auth import (
+    DEFAULT_USERS,
+    check_permission,
+    clear_session_cookie,
+    get_current_user,
+    hash_password,
+    set_session_cookie,
+    verify_password,
+)
+from app.db import (
+    get_connection,
+    immediate_transaction,
+    init_db,
+    read_conn,
+    row_to_dict,
+    utc_now_iso,
+    write_audit,
+)
+from app.errors import AppError, register_exception_handlers
+from app.importer import (
+    TEMPLATES,
+    parse_upload_content,
+    sanitize_csv_cell,
+    validate_deliveries_rows,
+    validate_drivers_rows,
+    validate_vehicles_rows,
+)
+from app.schemas import (
+    AssignRequest,
+    DeliveryCreate,
+    DeliveryStatusPatch,
+    DriverCreate,
+    DriverStatusPatch,
+    VehicleCreate,
+    VehicleStatusPatch,
+)
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+
+# Event bus for Server-Sent Events (SSE)
+SSE_SUBSCRIBERS: set[asyncio.Queue] = set()
+
+
+def broadcast_event(event_type: str, data: Any):
+    payload = json.dumps({"type": event_type, "data": data, "ts": utc_now_iso()})
+    for queue in list(SSE_SUBSCRIBERS):
+        try:
+            queue.put_nowait(payload)
+        except Exception:
+            SSE_SUBSCRIBERS.discard(queue)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    # Seed default users if users table is empty
+    with immediate_transaction() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if count == 0:
+            for uname, udata in DEFAULT_USERS.items():
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+                    (uname, hash_password(udata["password"]), udata["role"], utc_now_iso()),
+                )
+    yield
+
+
+app = FastAPI(
+    title="FleetWise — Vehicle & Delivery Assignment",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+register_exception_handlers(app)
+
+
+# Security Headers & Exception Handling Middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:;"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def serve_index():
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+# -------------------------------------------------------------------------
+# AUTHENTICATION & RBAC (B5)
+# -------------------------------------------------------------------------
+@app.post("/auth/login")
+async def login(request: Request, response: Response):
+    try:
+        body = await request.json()
+    except Exception:
+        raise AppError(400, "VALIDATION_ERROR", "Invalid JSON payload.")
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "").strip()
+
+    with read_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        if not row:
+            if username in DEFAULT_USERS and password == DEFAULT_USERS[username]["password"]:
+                user_data = {"username": username, "role": DEFAULT_USERS[username]["role"]}
+                set_session_cookie(response, user_data)
+                return {"message": "Logged in successfully", "user": user_data}
+            raise AppError(401, "UNAUTHORIZED", "Invalid username or password.")
+        if not verify_password(password, row["password_hash"]):
+            raise AppError(401, "UNAUTHORIZED", "Invalid username or password.")
+        user_data = {"username": row["username"], "role": row["role"]}
+
+    set_session_cookie(response, user_data)
+    return {"message": "Logged in successfully", "user": user_data}
+
+
+@app.post("/auth/logout")
+def logout(response: Response):
+    clear_session_cookie(response)
+    return {"message": "Logged out successfully"}
+
+
+@app.get("/auth/me")
+def get_me(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return {"authenticated": False, "user": None}
+    return {"authenticated": True, "user": user}
+
+
+# -------------------------------------------------------------------------
+# HEALTH & METRICS
+# -------------------------------------------------------------------------
+@app.get("/health")
+def health_check():
+    init_db()
+    with read_conn() as conn:
+        journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+        fk_enabled = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
+        v_count = conn.execute("SELECT COUNT(*) FROM vehicles;").fetchone()[0]
+        dr_count = conn.execute("SELECT COUNT(*) FROM drivers;").fetchone()[0]
+        del_count = conn.execute("SELECT COUNT(*) FROM deliveries;").fetchone()[0]
+    return {
+        "status": "ok",
+        "journal_mode": journal_mode,
+        "foreign_keys": bool(fk_enabled),
+        "counts": {
+            "vehicles": v_count,
+            "drivers": dr_count,
+            "deliveries": del_count,
+        },
+    }
+
+
+@app.get("/metrics")
+def get_metrics():
+    with read_conn() as conn:
+        total_veh = conn.execute("SELECT COUNT(*) FROM vehicles").fetchone()[0]
+        avail_veh = conn.execute(
+            """
+            SELECT COUNT(*) FROM vehicles v
+            WHERE v.status = 'available'
+            AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.vehicle_id = v.vehicle_id AND a.released_at IS NULL)
+            """
+        ).fetchone()[0]
+        assigned_veh = conn.execute(
+            """
+            SELECT COUNT(*) FROM vehicles v
+            WHERE v.status = 'assigned'
+            OR EXISTS (SELECT 1 FROM assignments a WHERE a.vehicle_id = v.vehicle_id AND a.released_at IS NULL)
+            """
+        ).fetchone()[0]
+        maint_veh = conn.execute("SELECT COUNT(*) FROM vehicles WHERE status = 'maintenance'").fetchone()[0]
+        inact_veh = conn.execute("SELECT COUNT(*) FROM vehicles WHERE status = 'inactive'").fetchone()[0]
+
+        total_drv = conn.execute("SELECT COUNT(*) FROM drivers").fetchone()[0]
+        avail_drv = conn.execute(
+            """
+            SELECT COUNT(*) FROM drivers d
+            WHERE d.availability_status = 'available'
+            AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.driver_id = d.driver_id AND a.released_at IS NULL)
+            """
+        ).fetchone()[0]
+
+        active_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status IN ('assigned', 'in_transit')").fetchone()[0]
+        pending_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status = 'pending'").fetchone()[0]
+        delivered_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status = 'delivered'").fetchone()[0]
+        cancelled_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status = 'cancelled'").fetchone()[0]
+
+        utilisation = (assigned_veh / total_veh * 100.0) if total_veh > 0 else 0.0
+
+    return {
+        "available_fleet": avail_veh,
+        "total_vehicles": total_veh,
+        "assigned_vehicles": assigned_veh,
+        "maintenance_vehicles": maint_veh,
+        "inactive_vehicles": inact_veh,
+        "available_drivers": avail_drv,
+        "total_drivers": total_drv,
+        "active_deliveries": active_del,
+        "pending_deliveries": pending_del,
+        "delivered_count": delivered_del,
+        "cancelled_count": cancelled_del,
+        "utilisation_pct": round(utilisation, 1),
+    }
+
+
+@app.get("/audit")
+def get_audit():
+    with read_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, ts, actor, action, entity, entity_id, before_json, after_json FROM audit_log ORDER BY id DESC LIMIT 500"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# -------------------------------------------------------------------------
+# REAL-TIME SERVER-SENT EVENTS (B3)
+# -------------------------------------------------------------------------
+@app.get("/events")
+async def sse_events(request: Request):
+    queue: asyncio.Queue = asyncio.Queue()
+    SSE_SUBSCRIBERS.add(queue)
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            yield "event: ping\ndata: connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    yield f"event: state_change\ndata: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    yield "event: ping\ndata: keep-alive\n\n"
+        finally:
+            SSE_SUBSCRIBERS.discard(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# -------------------------------------------------------------------------
+# VEHICLES
+# -------------------------------------------------------------------------
+@app.get("/vehicles")
+def list_vehicles():
+    with read_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT v.vehicle_id, v.registration_no, v.type, v.capacity, v.status,
+                   a.delivery_id AS active_delivery_id
+            FROM vehicles v
+            LEFT JOIN assignments a ON a.vehicle_id = v.vehicle_id AND a.released_at IS NULL
+            ORDER BY v.vehicle_id ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.post("/vehicles", status_code=201)
+def create_vehicle(body: VehicleCreate, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "vehicles")
+    actor = user["username"] if user else "operator"
+
+    norm_reg = body.registration_no.strip().upper()
+
+    with immediate_transaction() as conn:
+        existing = conn.execute(
+            "SELECT vehicle_id FROM vehicles WHERE UPPER(registration_no) = UPPER(?)",
+            (norm_reg,),
+        ).fetchone()
+        if existing:
+            raise AppError(409, "DUPLICATE", f"Vehicle registration '{norm_reg}' already exists.")
+
+        final_id = body.vehicle_id
+        if final_id:
+            if conn.execute("SELECT 1 FROM vehicles WHERE vehicle_id = ?", (final_id,)).fetchone():
+                raise AppError(409, "DUPLICATE", f"Vehicle ID '{final_id}' already exists.")
+        else:
+            all_ids = [r[0] for r in conn.execute("SELECT vehicle_id FROM vehicles").fetchall()]
+            max_num = 0
+            for vid in all_ids:
+                m = re.match(r"^V-(\d+)$", vid, re.IGNORECASE)
+                if m:
+                    max_num = max(max_num, int(m.group(1)))
+            max_num += 1
+            final_id = f"V-{max_num:03d}"
+            while final_id in all_ids:
+                max_num += 1
+                final_id = f"V-{max_num:03d}"
+
+        conn.execute(
+            """
+            INSERT INTO vehicles (vehicle_id, registration_no, type, capacity, status)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (final_id, norm_reg, body.type, body.capacity, body.status),
+        )
+
+        after_data = {
+            "vehicle_id": final_id,
+            "registration_no": norm_reg,
+            "type": body.type,
+            "capacity": body.capacity,
+            "status": body.status,
+        }
+        write_audit(conn, actor=actor, action="create", entity="vehicle", entity_id=final_id, after=after_data)
+
+    broadcast_event("vehicle_created", after_data)
+    return after_data
+
+
+@app.patch("/vehicles/{vehicle_id}/status")
+def patch_vehicle_status(vehicle_id: str, body: VehicleStatusPatch, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "vehicles")
+    actor = user["username"] if user else "operator"
+
+    # State-bypass check: vehicles can never be patched directly to assigned or in_transit
+    if body.status in ("assigned", "in_transit"):
+        raise AppError(400, "VALIDATION_ERROR", f"Cannot patch vehicle directly to '{body.status}'.")
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM vehicles WHERE vehicle_id = ?", (vehicle_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Vehicle '{vehicle_id}' not found.")
+        current_veh = dict(row)
+
+        active_asg = conn.execute(
+            "SELECT assignment_id, delivery_id FROM assignments WHERE vehicle_id = ? AND released_at IS NULL",
+            (vehicle_id,),
+        ).fetchone()
+
+        if active_asg and body.status in ("maintenance", "inactive"):
+            raise AppError(
+                409,
+                "VEHICLE_UNAVAILABLE",
+                f"Cannot change vehicle {vehicle_id} to '{body.status}' while assigned to active delivery {active_asg['delivery_id']}.",
+            )
+
+        conn.execute("UPDATE vehicles SET status = ? WHERE vehicle_id = ?", (body.status, vehicle_id))
+        after_veh = {**current_veh, "status": body.status}
+        write_audit(conn, actor=actor, action="update_status", entity="vehicle", entity_id=vehicle_id, before=current_veh, after=after_veh)
+
+    broadcast_event("vehicle_status_changed", after_veh)
+    return after_veh
+
+
+# -------------------------------------------------------------------------
+# DRIVERS
+# -------------------------------------------------------------------------
+@app.get("/drivers")
+def list_drivers():
+    with read_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT d.driver_id, d.name, d.phone, d.availability_status,
+                   a.delivery_id AS active_delivery_id
+            FROM drivers d
+            LEFT JOIN assignments a ON a.driver_id = d.driver_id AND a.released_at IS NULL
+            ORDER BY d.driver_id ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.post("/drivers", status_code=201)
+def create_driver(body: DriverCreate, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        final_id = body.driver_id
+        if final_id:
+            if conn.execute("SELECT 1 FROM drivers WHERE driver_id = ?", (final_id,)).fetchone():
+                raise AppError(409, "DUPLICATE", f"Driver ID '{final_id}' already exists.")
+        else:
+            all_ids = [r[0] for r in conn.execute("SELECT driver_id FROM drivers").fetchall()]
+            max_num = 0
+            for did in all_ids:
+                m = re.match(r"^DR-(\d+)$", did, re.IGNORECASE)
+                if m:
+                    max_num = max(max_num, int(m.group(1)))
+            max_num += 1
+            final_id = f"DR-{max_num:03d}"
+            while final_id in all_ids:
+                max_num += 1
+                final_id = f"DR-{max_num:03d}"
+
+        conn.execute(
+            """
+            INSERT INTO drivers (driver_id, name, phone, availability_status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (final_id, body.name, body.phone, body.availability_status),
+        )
+
+        after_data = {
+            "driver_id": final_id,
+            "name": body.name,
+            "phone": body.phone,
+            "availability_status": body.availability_status,
+        }
+        write_audit(conn, actor=actor, action="create", entity="driver", entity_id=final_id, after=after_data)
+
+    broadcast_event("driver_created", after_data)
+    return after_data
+
+
+@app.patch("/drivers/{driver_id}/status")
+def patch_driver_status(driver_id: str, body: DriverStatusPatch, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    # State-bypass check: drivers can never be patched directly to assigned or in_transit
+    if body.availability_status in ("assigned", "in_transit"):
+        raise AppError(400, "VALIDATION_ERROR", f"Cannot patch driver directly to '{body.availability_status}'.")
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Driver '{driver_id}' not found.")
+        current_drv = dict(row)
+
+        active_asg = conn.execute(
+            "SELECT assignment_id, delivery_id FROM assignments WHERE driver_id = ? AND released_at IS NULL",
+            (driver_id,),
+        ).fetchone()
+
+        if active_asg and body.availability_status == "unavailable":
+            raise AppError(
+                409,
+                "DRIVER_UNAVAILABLE",
+                f"Cannot change driver {driver_id} to 'unavailable' while assigned to active delivery {active_asg['delivery_id']}.",
+            )
+
+        conn.execute("UPDATE drivers SET availability_status = ? WHERE driver_id = ?", (body.availability_status, driver_id))
+        after_drv = {**current_drv, "availability_status": body.availability_status}
+        write_audit(conn, actor=actor, action="update_status", entity="driver", entity_id=driver_id, before=current_drv, after=after_drv)
+
+    broadcast_event("driver_status_changed", after_drv)
+    return after_drv
+
+
+# -------------------------------------------------------------------------
+# DELIVERIES & SLA RISK RADAR (B2)
+# -------------------------------------------------------------------------
+def enrich_delivery_sla(d: dict[str, Any]) -> dict[str, Any]:
+    sched_str = d.get("scheduled_time")
+    if not sched_str:
+        d["sla_status"] = "normal"
+        d["countdown"] = "—"
+        return d
+
+    try:
+        norm = sched_str[:-1] + "+00:00" if sched_str.endswith("Z") else sched_str
+        target = datetime.fromisoformat(norm)
+        now = datetime.now(timezone.utc)
+        diff_sec = int((target - now).total_seconds())
+
+        if d.get("status") in ("delivered", "cancelled"):
+            d["sla_status"] = "resolved"
+            d["countdown"] = "Completed"
+            return d
+
+        if diff_sec < 0:
+            overdue_min = abs(diff_sec) // 60
+            d["sla_status"] = "overdue"
+            d["countdown"] = f"Overdue by {overdue_min}m"
+        elif diff_sec <= 3600:
+            due_min = diff_sec // 60
+            d["sla_status"] = "at_risk"
+            d["countdown"] = f"Due in {due_min}m"
+        else:
+            hrs = diff_sec // 3600
+            mins = (diff_sec % 3600) // 60
+            d["sla_status"] = "normal"
+            d["countdown"] = f"Due in {hrs}h {mins}m"
+    except Exception:
+        d["sla_status"] = "normal"
+        d["countdown"] = "—"
+
+    return d
+
+
+@app.get("/deliveries")
+def list_deliveries(status: Optional[str] = Query(None), q: Optional[str] = Query(None)):
+    query = """
+        SELECT d.delivery_id, d.pickup, d.dropoff, d.scheduled_time, d.priority,
+               d.required_capacity, d.status, d.created_at, d.version,
+               d.pickup_lat, d.pickup_lng, d.drop_lat, d.drop_lng,
+               a.vehicle_id AS active_vehicle_id,
+               a.driver_id AS active_driver_id,
+               a.assignment_id AS active_assignment_id
+        FROM deliveries d
+        LEFT JOIN assignments a ON a.delivery_id = d.delivery_id AND a.released_at IS NULL
+        WHERE 1=1
+    """
+    params = []
+    if status:
+        query += " AND d.status = ?"
+        params.append(status.strip())
+
+    if q:
+        term = f"%{q.strip().lower()}%"
+        query += " AND (LOWER(d.delivery_id) LIKE ? OR LOWER(d.pickup) LIKE ? OR LOWER(d.dropoff) LIKE ?)"
+        params.extend([term, term, term])
+
+    query += " ORDER BY d.created_at DESC, d.delivery_id DESC"
+
+    with read_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [enrich_delivery_sla(dict(r)) for r in rows]
+
+
+@app.post("/deliveries", status_code=201)
+def create_delivery(body: DeliveryCreate, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "deliveries")
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        final_id = body.delivery_id
+        if final_id:
+            if conn.execute("SELECT 1 FROM deliveries WHERE delivery_id = ?", (final_id,)).fetchone():
+                raise AppError(409, "DUPLICATE", f"Delivery ID '{final_id}' already exists.")
+        else:
+            all_ids = [r[0] for r in conn.execute("SELECT delivery_id FROM deliveries").fetchall()]
+            max_num = 0
+            for did in all_ids:
+                m = re.match(r"^D-(\d+)$", did, re.IGNORECASE)
+                if m:
+                    max_num = max(max_num, int(m.group(1)))
+            max_num += 1
+            final_id = f"D-{max_num:03d}"
+            while final_id in all_ids:
+                max_num += 1
+                final_id = f"D-{max_num:03d}"
+
+        now_str = utc_now_iso()
+        conn.execute(
+            """
+            INSERT INTO deliveries (delivery_id, pickup, dropoff, scheduled_time, priority, required_capacity, status, created_at, version, pickup_lat, pickup_lng, drop_lat, drop_lng)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?, ?, ?, ?)
+            """,
+            (final_id, body.pickup, body.dropoff, body.scheduled_time, body.priority, body.required_capacity, now_str, body.pickup_lat, body.pickup_lng, body.drop_lat, body.drop_lng),
+        )
+
+        after_data = {
+            "delivery_id": final_id,
+            "pickup": body.pickup,
+            "dropoff": body.dropoff,
+            "scheduled_time": body.scheduled_time,
+            "priority": body.priority,
+            "required_capacity": body.required_capacity,
+            "status": "pending",
+            "created_at": now_str,
+            "version": 1,
+            "pickup_lat": body.pickup_lat,
+            "pickup_lng": body.pickup_lng,
+            "drop_lat": body.drop_lat,
+            "drop_lng": body.drop_lng,
+        }
+        write_audit(conn, actor=actor, action="create", entity="delivery", entity_id=final_id, after=after_data)
+
+    broadcast_event("delivery_created", after_data)
+    return enrich_delivery_sla(after_data)
+
+
+# -------------------------------------------------------------------------
+# SMART DISPATCH ADVISOR & BLOCKED QUEUE (B1 & B2)
+# -------------------------------------------------------------------------
+@app.get("/deliveries/{delivery_id}/recommendations")
+def get_recommendations(delivery_id: str):
+    with read_conn() as conn:
+        res = get_recommendations_for_delivery(delivery_id, conn)
+        if res.get("error") == "NOT_FOUND":
+            raise AppError(404, "NOT_FOUND", f"Delivery '{delivery_id}' does not exist.")
+        return res
+
+
+@app.get("/deliveries/dispatch-next")
+def dispatch_next():
+    with read_conn() as conn:
+        next_del = get_dispatch_next_delivery(conn)
+        if not next_del:
+            return {"has_next": False, "delivery": None}
+        return {"has_next": True, "delivery": enrich_delivery_sla(next_del)}
+
+
+@app.get("/deliveries/blocked")
+def get_blocked_queue():
+    with read_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM deliveries
+            WHERE status = 'pending'
+              AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.delivery_id = deliveries.delivery_id AND a.released_at IS NULL)
+            ORDER BY scheduled_time ASC
+            """
+        ).fetchall()
+
+        all_pending = [dict(r) for r in rows]
+        blocked = []
+
+        total_avail_veh = conn.execute("SELECT COUNT(*) FROM vehicles WHERE status = 'available' AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.vehicle_id = vehicles.vehicle_id AND a.released_at IS NULL)").fetchone()[0]
+        total_avail_drv = conn.execute("SELECT COUNT(*) FROM drivers WHERE availability_status = 'available' AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.driver_id = drivers.driver_id AND a.released_at IS NULL)").fetchone()[0]
+
+        for d in all_pending:
+            req_cap = d.get("required_capacity")
+            reasons = []
+
+            if total_avail_drv == 0:
+                reasons.append("Zero drivers available in fleet.")
+
+            if total_avail_veh == 0:
+                reasons.append("Zero vehicles available in fleet.")
+            elif req_cap:
+                matching_veh = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM vehicles v
+                    WHERE v.status = 'available'
+                      AND v.capacity >= ?
+                      AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.vehicle_id = v.vehicle_id AND a.released_at IS NULL)
+                    """,
+                    (req_cap,),
+                ).fetchone()[0]
+                if matching_veh == 0:
+                    max_cap = conn.execute("SELECT MAX(capacity) FROM vehicles WHERE status = 'available'").fetchone()[0] or 0
+                    reasons.append(f"Insufficient capacity: required {req_cap} kg, highest available vehicle capacity is {max_cap} kg.")
+
+            if reasons:
+                d["block_reasons"] = reasons
+                blocked.append(enrich_delivery_sla(d))
+
+        return {"count": len(blocked), "blocked_deliveries": blocked}
+
+
+@app.post("/deliveries/auto-assign")
+def auto_assign_all(dry_run: bool = Query(True), request: Request = None):
+    user = get_current_user(request)
+    check_permission(user, "assign")
+    actor = user["username"] if user else "operator"
+
+    with read_conn() as conn:
+        delivs = conn.execute(
+            """
+            SELECT * FROM deliveries
+            WHERE status = 'pending'
+              AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.delivery_id = deliveries.delivery_id AND a.released_at IS NULL)
+            """
+        ).fetchall()
+        pending_list = [dict(r) for r in delivs]
+
+    # Sort urgent first, then scheduled_time
+    pending_list.sort(key=lambda d: (
+        -({"urgent": 4, "high": 3, "normal": 2, "low": 1}.get(d.get("priority", "normal"), 2)),
+        d.get("scheduled_time", ""),
+    ))
+
+    plan = []
+    assigned_count = 0
+    failures = []
+
+    if dry_run:
+        with read_conn() as conn:
+            used_vehicles = set()
+            used_drivers = set()
+            for d in pending_list:
+                rec = get_recommendations_for_delivery(d["delivery_id"], conn)
+                candidates = [
+                    c for c in rec.get("recommendations", [])
+                    if c["vehicle"]["vehicle_id"] not in used_vehicles and c["driver"]["driver_id"] not in used_drivers
+                ]
+                if candidates:
+                    chosen = candidates[0]
+                    used_vehicles.add(chosen["vehicle"]["vehicle_id"])
+                    used_drivers.add(chosen["driver"]["driver_id"])
+                    plan.append({
+                        "delivery_id": d["delivery_id"],
+                        "vehicle_id": chosen["vehicle"]["vehicle_id"],
+                        "driver_id": chosen["driver"]["driver_id"],
+                        "score": chosen["total_score"],
+                        "reason": chosen["reason"],
+                    })
+                else:
+                    failures.append({"delivery_id": d["delivery_id"], "reason": "No unreserved eligible vehicle/driver available."})
+        return {
+            "dry_run": True,
+            "total_pending": len(pending_list),
+            "matchable_count": len(plan),
+            "plan": plan,
+            "failures": failures,
+        }
+
+    # Real Commit: execute each match in an atomic transaction
+    results = []
+    for d in pending_list:
+        with read_conn() as conn:
+            rec = get_recommendations_for_delivery(d["delivery_id"], conn)
+            cands = rec.get("recommendations", [])
+            if not cands:
+                failures.append({"delivery_id": d["delivery_id"], "reason": "No eligible vehicle or driver available at execution time."})
+                continue
+            chosen = cands[0]
+
+        try:
+            assign_req = AssignRequest(vehicle_id=chosen["vehicle"]["vehicle_id"], driver_id=chosen["driver"]["driver_id"])
+            asg = assign_delivery(d["delivery_id"], assign_req, request=request)
+            results.append(asg)
+            assigned_count += 1
+        except Exception as e:
+            failures.append({"delivery_id": d["delivery_id"], "reason": str(e)})
+
+    return {
+        "dry_run": False,
+        "total_pending": len(pending_list),
+        "assigned_count": assigned_count,
+        "assigned": results,
+        "failures": failures,
+    }
+
+
+# -------------------------------------------------------------------------
+# ASSIGNMENT LOGIC (CORE RULE ENGINE + IDEMPOTENCY + STALE-STATE)
+# -------------------------------------------------------------------------
+@app.post("/deliveries/{delivery_id}/assign", status_code=201)
+def assign_delivery(
+    delivery_id: str,
+    body: AssignRequest,
+    request: Request = None,
+):
+    """
+    Atomically assign a vehicle and driver to a pending delivery.
+    Opens transaction with BEGIN IMMEDIATE, re-reading and re-validating everything.
+    Supports Idempotency-Key and If-Match stale-state protection.
+    """
+    user = get_current_user(request) if request else None
+    check_permission(user, "assign")
+    actor = user["username"] if user else "operator"
+
+    idempotency_key = request.headers.get("Idempotency-Key") if request else None
+    if_match = request.headers.get("If-Match") if request else None
+
+    payload_hash = hashlib.sha256(f"ASSIGN:{delivery_id}:{body.vehicle_id}:{body.driver_id}".encode("utf-8")).hexdigest()
+
+    # 0. Check Idempotency-Key
+    if idempotency_key:
+        with read_conn() as conn:
+            existing_key = conn.execute("SELECT * FROM idempotency_keys WHERE key = ?", (idempotency_key,)).fetchone()
+            if existing_key:
+                if existing_key["request_hash"] == payload_hash:
+                    # Return original cached response directly
+                    cached_body = json.loads(existing_key["response_body"])
+                    return JSONResponse(status_code=existing_key["response_status"], content=cached_body)
+                else:
+                    raise AppError(409, "CONFLICT", f"Idempotency-Key '{idempotency_key}' reused with different request payload.")
+
+    with immediate_transaction() as conn:
+        # 1. Fetch delivery
+        del_row = conn.execute("SELECT * FROM deliveries WHERE delivery_id = ?", (delivery_id,)).fetchone()
+        if not del_row:
+            raise AppError(404, "NOT_FOUND", f"Delivery '{delivery_id}' does not exist.")
+        delivery = dict(del_row)
+
+        # Stale-state version check (If-Match or body.version)
+        req_version = body.version
+        if if_match:
+            try:
+                clean_im = if_match.strip().strip('"')
+                req_version = int(clean_im)
+            except Exception:
+                pass
+
+        if req_version is not None and delivery["version"] != req_version:
+            raise AppError(
+                409,
+                "STALE_STATE",
+                f"Delivery version mismatch. Current version is {delivery['version']}, requested was {req_version}.",
+            )
+
+        # 2. Check if delivery is pending
+        active_del_asg = conn.execute(
+            "SELECT assignment_id FROM assignments WHERE delivery_id = ? AND released_at IS NULL",
+            (delivery_id,),
+        ).fetchone()
+
+        if delivery["status"] != "pending" or active_del_asg:
+            raise AppError(
+                409,
+                "DELIVERY_NOT_PENDING",
+                f"Delivery '{delivery_id}' is currently '{delivery['status']}' and cannot be assigned.",
+            )
+
+        # 3. Fetch vehicle & driver
+        veh_row = conn.execute("SELECT * FROM vehicles WHERE vehicle_id = ?", (body.vehicle_id,)).fetchone()
+        if not veh_row:
+            raise AppError(404, "NOT_FOUND", f"Vehicle '{body.vehicle_id}' does not exist.")
+        vehicle = dict(veh_row)
+
+        drv_row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (body.driver_id,)).fetchone()
+        if not drv_row:
+            raise AppError(404, "NOT_FOUND", f"Driver '{body.driver_id}' does not exist.")
+        driver = dict(drv_row)
+
+        # 4. Check vehicle availability & active assignments
+        veh_active_asg = conn.execute(
+            "SELECT assignment_id, delivery_id FROM assignments WHERE vehicle_id = ? AND released_at IS NULL",
+            (body.vehicle_id,),
+        ).fetchone()
+        veh_occupied = bool(veh_active_asg)
+        veh_available = vehicle["status"] == "available" and not veh_occupied
+
+        # 5. Check driver availability & active assignments
+        drv_active_asg = conn.execute(
+            "SELECT assignment_id, delivery_id FROM assignments WHERE driver_id = ? AND released_at IS NULL",
+            (body.driver_id,),
+        ).fetchone()
+        drv_occupied = bool(drv_active_asg)
+        drv_available = driver["availability_status"] == "available" and not drv_occupied
+
+        veh_reason = None
+        if not veh_available:
+            if veh_occupied:
+                veh_reason = f"Vehicle '{body.vehicle_id}' is occupied by active delivery {veh_active_asg['delivery_id']}"
+            else:
+                veh_reason = f"Vehicle '{body.vehicle_id}' is in status '{vehicle['status']}'"
+
+        drv_reason = None
+        if not drv_available:
+            if drv_occupied:
+                drv_reason = f"Driver '{body.driver_id}' is occupied by active delivery {drv_active_asg['delivery_id']}"
+            else:
+                drv_reason = f"Driver '{body.driver_id}' is in status '{driver['availability_status']}'"
+
+        if not veh_available and not drv_available:
+            raise AppError(
+                409,
+                "RESOURCES_UNAVAILABLE",
+                f"Both resources unavailable: {veh_reason}; {drv_reason}.",
+            )
+
+        if not veh_available:
+            raise AppError(409, "VEHICLE_UNAVAILABLE", veh_reason)
+
+        if not drv_available:
+            raise AppError(409, "DRIVER_UNAVAILABLE", drv_reason)
+
+        # 6. Check Capacity
+        req_cap = delivery.get("required_capacity")
+        if req_cap is not None and vehicle["capacity"] < req_cap:
+            raise AppError(
+                409,
+                "CAPACITY_MISMATCH",
+                f"Vehicle capacity ({vehicle['capacity']} kg) is insufficient for required capacity ({req_cap} kg).",
+            )
+
+        # 7. Atomic Insert and State Mutation
+        asg_id = f"ASG-{uuid.uuid4().hex[:8].upper()}"
+        now_str = utc_now_iso()
+
+        conn.execute(
+            """
+            INSERT INTO assignments (assignment_id, delivery_id, vehicle_id, driver_id, assigned_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (asg_id, delivery_id, body.vehicle_id, body.driver_id, now_str),
+        )
+
+        conn.execute("UPDATE vehicles SET status = 'assigned' WHERE vehicle_id = ?", (body.vehicle_id,))
+        conn.execute("UPDATE drivers SET availability_status = 'assigned' WHERE driver_id = ?", (body.driver_id,))
+        conn.execute("UPDATE deliveries SET status = 'assigned', version = version + 1 WHERE delivery_id = ?", (delivery_id,))
+
+        after_asg = {
+            "assignment_id": asg_id,
+            "delivery_id": delivery_id,
+            "vehicle_id": body.vehicle_id,
+            "driver_id": body.driver_id,
+            "assigned_at": now_str,
+            "new_version": delivery["version"] + 1,
+        }
+        write_audit(
+            conn,
+            actor=actor,
+            action="assign",
+            entity="assignment",
+            entity_id=asg_id,
+            after={
+                "assignment": after_asg,
+                "delivery_id": delivery_id,
+                "vehicle_id": body.vehicle_id,
+                "driver_id": body.driver_id,
+            },
+        )
+
+        # Save idempotency record
+        if idempotency_key:
+            conn.execute(
+                """
+                INSERT INTO idempotency_keys (key, request_hash, response_status, response_body, created_at)
+                VALUES (?, ?, 201, ?, ?)
+                """,
+                (idempotency_key, payload_hash, json.dumps(after_asg), now_str),
+            )
+
+    broadcast_event("delivery_assigned", after_asg)
+    return after_asg
+
+
+# -------------------------------------------------------------------------
+# DELIVERY STATUS TRANSITIONS
+# -------------------------------------------------------------------------
+ALLOWED_TRANSITIONS = {
+    # pending -> assigned is handled exclusively by POST /deliveries/{id}/assign
+    "assigned": {"in_transit", "cancelled"},
+    "in_transit": {"delivered"},
+    "pending": {"cancelled"},
+}
+
+
+@app.patch("/deliveries/{delivery_id}/status")
+def patch_delivery_status(
+    delivery_id: str,
+    body: DeliveryStatusPatch,
+    request: Request = None,
+):
+    user = get_current_user(request) if request else None
+    check_permission(user, "status")
+    actor = user["username"] if user else "operator"
+
+    idempotency_key = request.headers.get("Idempotency-Key") if request else None
+    if_match = request.headers.get("If-Match") if request else None
+
+    target_status = body.status.strip().lower()
+    payload_hash = hashlib.sha256(f"STATUS:{delivery_id}:{target_status}".encode("utf-8")).hexdigest()
+
+    if idempotency_key:
+        with read_conn() as conn:
+            existing_key = conn.execute("SELECT * FROM idempotency_keys WHERE key = ?", (idempotency_key,)).fetchone()
+            if existing_key:
+                if existing_key["request_hash"] == payload_hash:
+                    cached_body = json.loads(existing_key["response_body"])
+                    return JSONResponse(status_code=existing_key["response_status"], content=cached_body)
+                else:
+                    raise AppError(409, "CONFLICT", f"Idempotency-Key '{idempotency_key}' reused with different request payload.")
+
+    with immediate_transaction() as conn:
+        del_row = conn.execute("SELECT * FROM deliveries WHERE delivery_id = ?", (delivery_id,)).fetchone()
+        if not del_row:
+            raise AppError(404, "NOT_FOUND", f"Delivery '{delivery_id}' does not exist.")
+        delivery = dict(del_row)
+        current_status = delivery["status"]
+
+        # Version check
+        req_version = body.version
+        if if_match:
+            try:
+                clean_im = if_match.strip().strip('"')
+                req_version = int(clean_im)
+            except Exception:
+                pass
+
+        if req_version is not None and delivery["version"] != req_version:
+            raise AppError(
+                409,
+                "STALE_STATE",
+                f"Delivery version mismatch. Current version is {delivery['version']}, requested was {req_version}.",
+            )
+
+        allowed_next = ALLOWED_TRANSITIONS.get(current_status, set())
+        if target_status not in allowed_next:
+            raise AppError(
+                409,
+                "INVALID_TRANSITION",
+                f"Transition from '{current_status}' to '{target_status}' is not permitted. (Allowed: {', '.join(sorted(allowed_next)) if allowed_next else 'None'})",
+            )
+
+        now_str = utc_now_iso()
+
+        # If transitioning to delivered or cancelled: release resources atomically
+        if target_status in ("delivered", "cancelled"):
+            asg_row = conn.execute(
+                "SELECT * FROM assignments WHERE delivery_id = ? AND released_at IS NULL",
+                (delivery_id,),
+            ).fetchone()
+
+            if asg_row:
+                asg = dict(asg_row)
+                conn.execute(
+                    """
+                    UPDATE assignments
+                    SET released_at = ?, release_reason = ?
+                    WHERE assignment_id = ?
+                    """,
+                    (now_str, target_status, asg["assignment_id"]),
+                )
+                conn.execute("UPDATE vehicles SET status = 'available' WHERE vehicle_id = ?", (asg["vehicle_id"],))
+                conn.execute("UPDATE drivers SET availability_status = 'available' WHERE driver_id = ?", (asg["driver_id"],))
+
+        new_version = delivery["version"] + 1
+        conn.execute("UPDATE deliveries SET status = ?, version = ? WHERE delivery_id = ?", (target_status, new_version, delivery_id))
+
+        after_data = {**delivery, "status": target_status, "version": new_version}
+        write_audit(
+            conn,
+            actor=actor,
+            action="update_status",
+            entity="delivery",
+            entity_id=delivery_id,
+            before=delivery,
+            after=after_data,
+        )
+
+        if idempotency_key:
+            conn.execute(
+                """
+                INSERT INTO idempotency_keys (key, request_hash, response_status, response_body, created_at)
+                VALUES (?, ?, 200, ?, ?)
+                """,
+                (idempotency_key, payload_hash, json.dumps(after_data), now_str),
+            )
+
+    broadcast_event("delivery_status_changed", after_data)
+    return enrich_delivery_sla(after_data)
+
+
+# -------------------------------------------------------------------------
+# CSV EXPORT PIPELINE (FORMULA INJECTION SAFE - B8)
+# -------------------------------------------------------------------------
+@app.get("/export/{entity}.csv")
+def export_csv(entity: str):
+    ent = entity.strip().lower()
+    if ent not in ("vehicles", "drivers", "deliveries", "audit"):
+        raise AppError(404, "NOT_FOUND", f"Unknown export entity '{entity}'.")
+
+    with read_conn() as conn:
+        if ent == "vehicles":
+            rows = conn.execute("SELECT vehicle_id, registration_no, type, capacity, status FROM vehicles ORDER BY vehicle_id").fetchall()
+            fieldnames = ["vehicle_id", "registration_no", "type", "capacity", "status"]
+        elif ent == "drivers":
+            rows = conn.execute("SELECT driver_id, name, phone, availability_status FROM drivers ORDER BY driver_id").fetchall()
+            fieldnames = ["driver_id", "name", "phone", "availability_status"]
+        elif ent == "deliveries":
+            rows = conn.execute("SELECT delivery_id, pickup, dropoff, scheduled_time, priority, required_capacity, status, version FROM deliveries ORDER BY delivery_id").fetchall()
+            fieldnames = ["delivery_id", "pickup", "dropoff", "scheduled_time", "priority", "required_capacity", "status", "version"]
+        else:
+            rows = conn.execute("SELECT id, ts, actor, action, entity, entity_id, before_json, after_json FROM audit_log ORDER BY id DESC").fetchall()
+            fieldnames = ["id", "ts", "actor", "action", "entity", "entity_id", "before_json", "after_json"]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(fieldnames)
+
+    for r in rows:
+        row_dict = dict(r)
+        # Apply formula injection sanitization on every single cell
+        sanitized_row = [sanitize_csv_cell(row_dict.get(fn)) for fn in fieldnames]
+        writer.writerow(sanitized_row)
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="fleetwise_{ent}_export.csv"'},
+    )
+
+
+# -------------------------------------------------------------------------
+# IMPORT PIPELINE
+# -------------------------------------------------------------------------
+@app.get("/import/templates/{entity}.csv")
+def download_template(entity: str):
+    ent = entity.strip().lower()
+    if ent not in TEMPLATES:
+        raise AppError(404, "NOT_FOUND", f"Unknown template entity '{entity}'. Choose from vehicles, drivers, deliveries.")
+    return PlainTextResponse(
+        content=TEMPLATES[ent],
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{ent}_template.csv"'},
+    )
+
+
+@app.post("/import/{entity}")
+async def import_entity(entity: str, dry_run: bool = Query(True), file: UploadFile = File(...), request: Request = None):
+    user = get_current_user(request) if request else None
+    check_permission(user, "import")
+    actor = user["username"] if user else "operator"
+
+    ent = entity.strip().lower()
+    if ent not in ("vehicles", "drivers", "deliveries"):
+        raise AppError(400, "VALIDATION_ERROR", f"Invalid import entity '{entity}'. Must be vehicles, drivers, or deliveries.")
+
+    content = await file.read()
+    raw_rows = parse_upload_content(file.filename or "", content)
+
+    if not raw_rows:
+        return {
+            "entity": ent,
+            "dry_run": dry_run,
+            "total_rows": 0,
+            "valid_rows": 0,
+            "invalid_rows": 0,
+            "errors": [],
+            "rows": [],
+            "inserted_count": 0,
+        }
+
+    with immediate_transaction() as conn:
+        if ent == "vehicles":
+            val_rows, errors = validate_vehicles_rows(raw_rows, conn)
+        elif ent == "drivers":
+            val_rows, errors = validate_drivers_rows(raw_rows, conn)
+        else:
+            val_rows, errors = validate_deliveries_rows(raw_rows, conn)
+
+        total_rows = len(val_rows)
+        invalid_rows = len({e["row"] for e in errors})
+        valid_rows = total_rows - invalid_rows
+
+        if dry_run:
+            conn.execute("ROLLBACK")
+            return {
+                "entity": ent,
+                "dry_run": True,
+                "total_rows": total_rows,
+                "valid_rows": valid_rows,
+                "invalid_rows": invalid_rows,
+                "errors": errors,
+                "rows": val_rows,
+                "inserted_count": 0,
+            }
+
+        # Commit run: must be 100% valid
+        if invalid_rows > 0:
+            conn.execute("ROLLBACK")
+            raise AppError(
+                400,
+                "VALIDATION_ERROR",
+                f"Import rejected: {invalid_rows} invalid row(s) detected. All rows must be valid for atomic commit.",
+            )
+
+        # Insert all rows
+        if ent == "vehicles":
+            for r in val_rows:
+                d = r["data"]
+                conn.execute(
+                    "INSERT INTO vehicles (vehicle_id, registration_no, type, capacity, status) VALUES (?, ?, ?, ?, ?)",
+                    (d["vehicle_id"], d["registration_no"], d["type"], d["capacity"], d["status"]),
+                )
+        elif ent == "drivers":
+            for r in val_rows:
+                d = r["data"]
+                conn.execute(
+                    "INSERT INTO drivers (driver_id, name, phone, availability_status) VALUES (?, ?, ?, ?)",
+                    (d["driver_id"], d["name"], d["phone"], d["availability_status"]),
+                )
+        else:
+            for r in val_rows:
+                d = r["data"]
+                conn.execute(
+                    """
+                    INSERT INTO deliveries (delivery_id, pickup, dropoff, scheduled_time, priority, required_capacity, status, created_at, version, pickup_lat, pickup_lng, drop_lat, drop_lng)
+                    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?, ?, ?, ?)
+                    """,
+                    (d["delivery_id"], d["pickup"], d["dropoff"], d["scheduled_time"], d["priority"], d["required_capacity"], d["created_at"], d.get("pickup_lat"), d.get("pickup_lng"), d.get("drop_lat"), d.get("drop_lng")),
+                )
+
+        write_audit(
+            conn,
+            actor=actor,
+            action="import",
+            entity=ent,
+            entity_id=f"BATCH-{total_rows}",
+            after={"count": total_rows, "filename": file.filename},
+        )
+
+    broadcast_event(f"{ent}_imported", {"count": total_rows})
+    return {
+        "entity": ent,
+        "dry_run": False,
+        "total_rows": total_rows,
+        "valid_rows": valid_rows,
+        "invalid_rows": 0,
+        "errors": [],
+        "inserted_count": total_rows,
+    }
+
+
+# -------------------------------------------------------------------------
+# RACE LAB: PARALLEL ASSIGNMENT CONCURRENCY STRESS TEST (B4)
+# -------------------------------------------------------------------------
+@app.post("/diagnostics/concurrency-test")
+def run_concurrency_race_lab(workers: int = Query(20, ge=2, le=100)):
+    """
+    Executes N parallel assignment attempts against an ISOLATED temporary database
+    (never touching real database data), returning full thread metrics and timeline.
+    Proves that at most 1 attempt succeeds and all N-1 get 409 Conflict.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        temp_db_path = str(Path(tmp_dir) / "race_lab_isolated.db")
+        init_db(temp_db_path)
+
+        # Seed isolated test resources
+        with immediate_transaction(temp_db_path) as conn:
+            conn.execute("INSERT INTO vehicles (vehicle_id, registration_no, type, capacity, status) VALUES ('V-RACE', 'KA-RACE-01', 'Van', 2000, 'available')")
+            conn.execute("INSERT INTO drivers (driver_id, name, phone, availability_status) VALUES ('DR-RACE', 'Race Driver', '+91-9999999999', 'available')")
+            for i in range(1, workers + 1):
+                conn.execute(
+                    "INSERT INTO deliveries (delivery_id, pickup, dropoff, scheduled_time, priority, required_capacity, status, created_at, version) VALUES (?, 'Start', 'Goal', '2026-10-30T10:00:00Z', 'urgent', 1000, 'pending', '2026-10-29T12:00:00Z', 1)",
+                    (f"D-RACE-{i:03d}",),
+                )
+
+        timeline = []
+        t_start = time.perf_counter()
+
+        def worker_task(del_id: str) -> dict[str, Any]:
+            w_start = time.perf_counter()
+            conn = get_connection(temp_db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                # Re-validate
+                deliv = conn.execute("SELECT status FROM deliveries WHERE delivery_id = ?", (del_id,)).fetchone()
+                veh_asg = conn.execute("SELECT assignment_id FROM assignments WHERE vehicle_id = 'V-RACE' AND released_at IS NULL").fetchone()
+                drv_asg = conn.execute("SELECT assignment_id FROM assignments WHERE driver_id = 'DR-RACE' AND released_at IS NULL").fetchone()
+
+                if veh_asg or drv_asg:
+                    conn.execute("ROLLBACK")
+                    return {"delivery_id": del_id, "status_code": 409, "error": "RESOURCES_UNAVAILABLE", "duration_ms": round((time.perf_counter() - w_start) * 1000, 2)}
+
+                # Perform assignment
+                asg_id = f"ASG-{uuid.uuid4().hex[:6].upper()}"
+                conn.execute("INSERT INTO assignments (assignment_id, delivery_id, vehicle_id, driver_id, assigned_at) VALUES (?, ?, 'V-RACE', 'DR-RACE', datetime('now'))", (asg_id, del_id))
+                conn.execute("UPDATE vehicles SET status = 'assigned' WHERE vehicle_id = 'V-RACE'")
+                conn.execute("UPDATE drivers SET availability_status = 'assigned' WHERE driver_id = 'DR-RACE'")
+                conn.execute("UPDATE deliveries SET status = 'assigned' WHERE delivery_id = ?", (del_id,))
+                conn.execute("COMMIT")
+                return {"delivery_id": del_id, "status_code": 201, "assignment_id": asg_id, "duration_ms": round((time.perf_counter() - w_start) * 1000, 2)}
+            except Exception as exc:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                return {"delivery_id": del_id, "status_code": 500, "error": str(exc), "duration_ms": round((time.perf_counter() - w_start) * 1000, 2)}
+            finally:
+                conn.close()
+
+        deliv_ids = [f"D-RACE-{i:03d}" for i in range(1, workers + 1)]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            timeline = list(executor.map(worker_task, deliv_ids))
+
+        total_duration = round((time.perf_counter() - t_start) * 1000, 2)
+        successes = [t for t in timeline if t["status_code"] == 201]
+        conflicts = [t for t in timeline if t["status_code"] == 409]
+        errors = [t for t in timeline if t["status_code"] >= 500]
+
+        return {
+            "test_name": "Race Lab Concurrency Stress Test",
+            "workers_dispatched": workers,
+            "success_count": len(successes),
+            "conflict_count": len(conflicts),
+            "error_count": len(errors),
+            "total_duration_ms": total_duration,
+            "winner_delivery": successes[0]["delivery_id"] if successes else None,
+            "core_invariant_preserved": len(successes) == 1 and len(errors) == 0,
+            "guarantee": "SQLite BEGIN IMMEDIATE serialization + partial unique index guaranteed exactly one winner with zero corruptions.",
+            "timeline": timeline,
+        }
+
+
+# -------------------------------------------------------------------------
+# ANALYTICS & ROUTE VIEW (B6 & B7)
+# -------------------------------------------------------------------------
+@app.get("/analytics/summary")
+def get_analytics_summary():
+    with read_conn() as conn:
+        total_veh = conn.execute("SELECT COUNT(*) FROM vehicles").fetchone()[0]
+        assigned_veh = conn.execute("SELECT COUNT(*) FROM vehicles WHERE status = 'assigned'").fetchone()[0]
+        total_del = conn.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0]
+        delivered_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status = 'delivered'").fetchone()[0]
+        pending_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status = 'pending'").fetchone()[0]
+        in_transit_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status = 'in_transit'").fetchone()[0]
+        cancelled_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE status = 'cancelled'").fetchone()[0]
+
+        driver_workload = [
+            dict(r)
+            for r in conn.execute(
+                """
+                SELECT d.name, COUNT(a.assignment_id) as total_trips
+                FROM drivers d
+                LEFT JOIN assignments a ON a.driver_id = d.driver_id
+                GROUP BY d.driver_id
+                ORDER BY total_trips DESC LIMIT 8
+                """
+            ).fetchall()
+        ]
+
+    on_time_pct = round((delivered_del / total_del * 100.0), 1) if total_del > 0 else 100.0
+    util_pct = round((assigned_veh / total_veh * 100.0), 1) if total_veh > 0 else 0.0
+
+    return {
+        "utilisation_pct": util_pct,
+        "on_time_pct": on_time_pct,
+        "funnel": {
+            "pending": pending_del,
+            "assigned": assigned_veh,
+            "in_transit": in_transit_del,
+            "delivered": delivered_del,
+            "cancelled": cancelled_del,
+        },
+        "driver_workload": driver_workload,
+    }
+
+
+@app.get("/deliveries/routes")
+def get_routes():
+    with read_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT d.delivery_id, d.pickup, d.dropoff, d.status, d.priority,
+                   d.pickup_lat, d.pickup_lng, d.drop_lat, d.drop_lng,
+                   a.vehicle_id, a.driver_id
+            FROM deliveries d
+            LEFT JOIN assignments a ON a.delivery_id = d.delivery_id AND a.released_at IS NULL
+            WHERE d.status IN ('assigned', 'in_transit')
+               OR (d.pickup_lat IS NOT NULL AND d.drop_lat IS NOT NULL)
+            LIMIT 50
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]

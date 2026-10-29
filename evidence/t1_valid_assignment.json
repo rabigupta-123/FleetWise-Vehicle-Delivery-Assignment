@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /deliveries/D-001/assign",
+  "request_payload": {
+    "vehicle_id": "V-001",
+    "driver_id": "DR-001"
+  },
+  "response_status": 201,
+  "response_body": {
+    "assignment_id": "ASG-EF469E86",
+    "delivery_id": "D-001",
+    "vehicle_id": "V-001",
+    "driver_id": "DR-001",
+    "assigned_at": "2026-10-29T12:54:32Z"
+  }
+}

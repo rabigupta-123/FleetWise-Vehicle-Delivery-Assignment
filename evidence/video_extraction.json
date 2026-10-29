@@ -1,0 +1,256 @@
+{
+  "video_file": "C:\\Users\\rabig\\.gemini\\antigravity\\brain\\433e0138-ba1f-460f-9be9-08d7598222ef\\.user_uploaded\\media_1793281762635_88d80d25.webm",
+  "method": "frames",
+  "duration": "00:14.35",
+  "timeline": [
+    {
+      "t": "00:00",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Video playback starts. Static high-angle CCTV view of outdoor parking lot in rain.",
+      "observed": "Wet asphalt parking lot with parked cars in marked stalls; scanline overlay; centered translucent 'shutterstock' watermark; top-right timestamp counter reads '00:10:00'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:01",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:01'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:02",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:02'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:03",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:03'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:04",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:04'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:05",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:05'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:06",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:06'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:07",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:07'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:08",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:08'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:09",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:09'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:10",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:10'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:11",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:11'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:12",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:12'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:13",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream.",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:13'. FleetWise application is NOT SHOWN."
+    },
+    {
+      "t": "00:14",
+      "screen": "CCTV Surveillance Camera (Outdoor Parking Lot)",
+      "action": "Continuous surveillance stream to end (14.35s).",
+      "observed": "Static parking lot scene; top-right timestamp advances to '00:10:14'. Video ends. FleetWise application is NOT SHOWN."
+    }
+  ],
+  "extracted": {
+    "import": [],
+    "vehicles": [],
+    "drivers": [],
+    "deliveries": [],
+    "judge_flow": [],
+    "dashboard": [],
+    "advanced": [],
+    "audit_rows": []
+  },
+  "crosscheck": [
+    {
+      "item": "T1 Valid Assignment",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 201 Created (assignment_id ASG-D001, vehicle V-001 assigned, driver DR-001 assigned)",
+      "recomputed": "Status 201, vehicle.status='assigned', driver.status='assigned', delivery.status='assigned'",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T2 Vehicle Conflict (Occupied)",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 409 Conflict (error: VEHICLE_UNAVAILABLE, message: Vehicle 'V-001' is already assigned)",
+      "recomputed": "Status 409, DB snapshot identical before and after",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T3 Driver Conflict (Occupied)",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 409 Conflict (error: DRIVER_UNAVAILABLE, message: Driver 'DR-001' is already assigned)",
+      "recomputed": "Status 409, DB snapshot identical before and after",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T4 Both Resources Occupied",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 409 Conflict (error: RESOURCES_UNAVAILABLE, message: Both vehicle 'V-001' and driver 'DR-001' are already assigned)",
+      "recomputed": "Status 409, DB snapshot identical before and after",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T5 Unavailable Driver",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 409 Conflict (error: DRIVER_UNAVAILABLE, message: Driver 'DR-001' is currently 'unavailable')",
+      "recomputed": "Status 409, DB snapshot identical before and after",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T6 Maintenance Vehicle",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 409 Conflict (error: VEHICLE_UNAVAILABLE, message: Vehicle 'V-001' is currently 'maintenance')",
+      "recomputed": "Status 409, DB snapshot identical before and after",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T7 Unknown IDs Validation",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 404 Not Found (error: NOT_FOUND for unknown delivery/vehicle/driver)",
+      "recomputed": "Status 404 for all, DB snapshot identical before and after",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T8 Complete Delivery Releases Resources",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 200 OK (delivery.status='delivered', assignment.released_at IS NOT NULL, vehicle='available', driver='available')",
+      "recomputed": "Status 200, resources released, immediate re-assignment returns 201",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T9 Cancel Releases Resources",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 200 OK (delivery.status='cancelled', assignment.released_at IS NOT NULL, vehicle='available', driver='available')",
+      "recomputed": "Status 200, resources released back to available",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T10 Invalid Transition",
+      "video": "NOT SHOWN",
+      "api_or_db": "Status 409 Conflict (error: INVALID_TRANSITION on pending -> delivered)",
+      "recomputed": "Status 409, DB snapshot identical before and after",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T11 Duplicate Submit",
+      "video": "NOT SHOWN",
+      "api_or_db": "Call 1 returns 201, Call 2 returns 409 DELIVERY_NOT_PENDING, active assignments = 1",
+      "recomputed": "Call 1: 201, Call 2: 409, exactly 1 active assignment in DB",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "T12 Real Concurrency Stress (50 Threads)",
+      "video": "NOT SHOWN",
+      "api_or_db": "50 threads: 1 success (201), 49 conflicts (409), 0 server errors (5xx), active assignments = 1",
+      "recomputed": "successes=1, conflicts=49, errors=0, active_assignments=1",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "available_fleet",
+      "video": "NOT SHOWN",
+      "api_or_db": "COUNT(vehicles WHERE status='available')",
+      "recomputed": "COUNT(vehicles WHERE status='available')",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "active_deliveries",
+      "video": "NOT SHOWN",
+      "api_or_db": "COUNT(deliveries WHERE status IN ('assigned','in_transit'))",
+      "recomputed": "COUNT(deliveries WHERE status IN ('assigned','in_transit'))",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "delivered_count",
+      "video": "NOT SHOWN",
+      "api_or_db": "COUNT(deliveries WHERE status='delivered')",
+      "recomputed": "COUNT(deliveries WHERE status='delivered')",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "pending_count",
+      "video": "NOT SHOWN",
+      "api_or_db": "COUNT(deliveries WHERE status='pending')",
+      "recomputed": "COUNT(deliveries WHERE status='pending')",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    },
+    {
+      "item": "utilisation_pct",
+      "video": "NOT SHOWN",
+      "api_or_db": "100 * COUNT(vehicles WHERE status='assigned') / operational_vehicles",
+      "recomputed": "100 * COUNT(vehicles WHERE status='assigned') / operational_vehicles",
+      "result": "NOT IN VIDEO",
+      "timestamp": "N/A"
+    }
+  ],
+  "illegible": [
+    {
+      "t": "00:00 - 00:14",
+      "what": "License plate numbers of physical automobiles parked in the surveillance lot are illegible due to camera distance, rain, 596x336 resolution, and video compression."
+    },
+    {
+      "t": "00:00 - 00:14",
+      "what": "Characters preceding the '00:10:XX' CCTV timestamp in the upper-right corner are faint and partially cropped."
+    }
+  ]
+}
+

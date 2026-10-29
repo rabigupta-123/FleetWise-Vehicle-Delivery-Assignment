@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /deliveries/D-002/assign",
+  "request_payload": {
+    "vehicle_id": "V-001",
+    "driver_id": "DR-001"
+  },
+  "response_status": 409,
+  "response_body": {
+    "error": "RESOURCES_UNAVAILABLE",
+    "message": "Both resources unavailable: Vehicle 'V-001' is occupied by active delivery D-001; Driver 'DR-001' is occupied by active delivery D-001."
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "call_1": {
+    "status": 201,
+    "body": {
+      "assignment_id": "ASG-2189E0EB",
+      "delivery_id": "D-004",
+      "vehicle_id": "V-001",
+      "driver_id": "DR-001",
+      "assigned_at": "2026-10-29T12:54:32Z"
+    }
+  },
+  "call_2": {
+    "status": 409,
+    "body": {
+      "error": "DELIVERY_NOT_PENDING",
+      "message": "Delivery 'D-004' is currently 'assigned' and cannot be assigned."
+    }
+  }
+}

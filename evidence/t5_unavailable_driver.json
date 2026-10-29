@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /deliveries/D-003/assign",
+  "request_payload": {
+    "vehicle_id": "V-002",
+    "driver_id": "DR-UNAVAIL"
+  },
+  "response_status": 409,
+  "response_body": {
+    "error": "DRIVER_UNAVAILABLE",
+    "message": "Driver 'DR-UNAVAIL' is in status 'unavailable'"
+  }
+}

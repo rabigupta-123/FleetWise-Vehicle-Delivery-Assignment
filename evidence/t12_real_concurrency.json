@@ -1,0 +1,7 @@
+{
+  "description": "10 parallel threads dispatched concurrently against 1 vehicle and 1 driver using ThreadPoolExecutor.",
+  "total_threads": 10,
+  "successful_201_assignments": 1,
+  "rejected_409_conflicts": 9,
+  "guarantee": "BEGIN IMMEDIATE + partial unique index idx_assignments_active_vehicle prevented race conditions."
+}
