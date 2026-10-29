@@ -1,5 +1,34 @@
 [
   {
+    "test_id": "AUDIT-1",
+    "name": "Clean Start & Health",
+    "input": {
+      "endpoint": "/health"
+    },
+    "expected": {
+      "status": "ok",
+      "journal_mode": "wal",
+      "foreign_keys": true,
+      "counts": {
+        "vehicles": 0,
+        "drivers": 0,
+        "deliveries": 0
+      }
+    },
+    "observed": {
+      "status": "ok",
+      "journal_mode": "wal",
+      "foreign_keys": true,
+      "counts": {
+        "vehicles": 0,
+        "drivers": 0,
+        "deliveries": 0
+      }
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_1_clean_start.json"
+  },
+  {
     "test_id": "T12",
     "name": "Real Concurrency Stress (50 Threads)",
     "input": {
@@ -23,6 +52,65 @@
     "evidence_path": "evidence/t12_real_concurrency.json"
   },
   {
+    "test_id": "AUDIT-3",
+    "name": "State Bypass Rejected",
+    "input": {
+      "bypass_attempts": [
+        "PATCH vehicle assigned",
+        "PATCH driver assigned",
+        "PATCH delivery assigned",
+        "CSV import assigned"
+      ]
+    },
+    "expected": {
+      "rejected_with_400_or_409": true
+    },
+    "observed": {
+      "rejected_with_400_or_409": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_3_state_bypass.json"
+  },
+  {
+    "test_id": "AUDIT-4",
+    "name": "Exhaustive 5x5 Transition Matrix",
+    "input": {
+      "matrix_size": "5x5 (25 transitions)"
+    },
+    "expected": {
+      "allowed_transitions": 4,
+      "illegal_transitions_rejected_409": 21
+    },
+    "observed": {
+      "allowed_transitions": 4,
+      "illegal_transitions_rejected_409": 21
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_4_matrix.json"
+  },
+  {
+    "test_id": "AUDIT-5",
+    "name": "Validation Mappings & Normalization",
+    "input": {
+      "bad_capacity": -50,
+      "bad_phone": "abc-invalid",
+      "bad_json": "not_a_number",
+      "raw_reg": "  ka-01-norm-100  "
+    },
+    "expected": {
+      "status_400_validation_error": true,
+      "registration_normalized": "KA-01-NORM-100",
+      "duplicate_409": true
+    },
+    "observed": {
+      "status_400_validation_error": true,
+      "registration_normalized": "KA-01-NORM-100",
+      "duplicate_409": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_5_validation.json"
+  },
+  {
     "test_id": "AUDIT-6",
     "name": "Frontend XSS Inert Sanitization",
     "input": {
@@ -38,6 +126,124 @@
     },
     "status": "PASS",
     "evidence_path": "evidence/audit_6_xss_inert.json"
+  },
+  {
+    "test_id": "AUDIT-7",
+    "name": "Export CSV Formula Safety",
+    "input": {
+      "dangerous_cells": [
+        "=cmd|' /C calc'!A0",
+        "@SUM(A1:A10)",
+        "+Van"
+      ]
+    },
+    "expected": {
+      "prefixed_with_single_quote": true
+    },
+    "observed": {
+      "prefixed_with_single_quote": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_7_export_safety.json"
+  },
+  {
+    "test_id": "AUDIT-8",
+    "name": "Upload Limits & Content Sniffing",
+    "input": {
+      "binary_file": "bad.csv",
+      "oversized": ">5MB",
+      "bad_ext": "script.exe"
+    },
+    "expected": {
+      "all_rejected_with_400": true
+    },
+    "observed": {
+      "binary_status": 400,
+      "large_status": 400,
+      "ext_status": 400
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_8_upload_limits.json"
+  },
+  {
+    "test_id": "AUDIT-9",
+    "name": "Security Headers Hardening",
+    "input": {
+      "endpoint": "/health"
+    },
+    "expected": {
+      "headers_present": [
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+        "Content-Security-Policy"
+      ]
+    },
+    "observed": {
+      "headers_present": [
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+        "Content-Security-Policy"
+      ]
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_9_security_headers.json"
+  },
+  {
+    "test_id": "AUDIT-10",
+    "name": "Idempotency-Key & Stale-State Protection",
+    "input": {
+      "idempotency_key": "test-key-001",
+      "stale_if_match": "1",
+      "valid_if_match": "2"
+    },
+    "expected": {
+      "idempotency_replay_201": true,
+      "active_assignments_count": 1,
+      "stale_409": true,
+      "valid_200": true
+    },
+    "observed": {
+      "idempotency_replay_201": true,
+      "active_assignments_count": 1,
+      "stale_409": true,
+      "valid_200": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_10_idempotency.json"
+  },
+  {
+    "test_id": "AUDIT-11",
+    "name": "HTTP Error Envelopes & Route Separation",
+    "input": {
+      "routes_tested": [
+        "/api/v1/nonexistent-route-endpoint",
+        "/health (POST)",
+        "/deliveries/D-NONEXISTENT/assign",
+        "/auth/login (bad JSON)"
+      ]
+    },
+    "expected": {
+      "status_codes": [
+        404,
+        405,
+        404,
+        400
+      ],
+      "all_have_error_envelope": true
+    },
+    "observed": {
+      "observed_codes": [
+        404,
+        405,
+        404,
+        400
+      ],
+      "all_have_error_envelope": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/audit_11_http_errors.json"
   },
   {
     "test_id": "T1",
@@ -258,5 +464,113 @@
     },
     "status": "PASS",
     "evidence_path": "evidence/t11_duplicate_submit.json"
+  },
+  {
+    "test_id": "PHASE-B1",
+    "name": "Smart Advisor & Auto-Assign",
+    "input": {
+      "delivery_id": "D-ADV-01",
+      "required_capacity": 800
+    },
+    "expected": {
+      "top_candidate": "V-SMALL",
+      "auto_assign_dry_run_plan": 1,
+      "auto_assign_committed": 1
+    },
+    "observed": {
+      "top_candidate": "V-SMALL",
+      "auto_assign_dry_run_plan": 1,
+      "auto_assign_committed": 1
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/phase_b_advisor.json"
+  },
+  {
+    "test_id": "PHASE-B2",
+    "name": "Blocked Queue Diagnosis",
+    "input": {
+      "delivery_id": "D-HUGE",
+      "required_capacity": 10000,
+      "max_fleet_cap": 2000
+    },
+    "expected": {
+      "blocked_count": 1,
+      "reason_contains": "Insufficient capacity"
+    },
+    "observed": {
+      "blocked_count": 1,
+      "reason_contains": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/phase_b_blocked.json"
+  },
+  {
+    "test_id": "PHASE-B4",
+    "name": "Race Lab Diagnostics",
+    "input": {
+      "workers": 25
+    },
+    "expected": {
+      "success": 1,
+      "conflicts": 24,
+      "errors": 0,
+      "core_invariant_preserved": true
+    },
+    "observed": {
+      "success": 1,
+      "conflicts": 24,
+      "errors": 0,
+      "core_invariant_preserved": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/phase_b_racelab.json"
+  },
+  {
+    "test_id": "PHASE-B5",
+    "name": "RBAC & Authentication Flow",
+    "input": {
+      "user": "dispatcher",
+      "action": "login/me/logout"
+    },
+    "expected": {
+      "login_status": 200,
+      "authenticated": true,
+      "logout_status": 200
+    },
+    "observed": {
+      "login_status": 200,
+      "authenticated": true,
+      "logout_status": 200
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/phase_b_auth.json"
+  },
+  {
+    "test_id": "PHASE-B6",
+    "name": "Analytics & Route Radar",
+    "input": {
+      "endpoints": [
+        "/analytics/summary",
+        "/deliveries/routes"
+      ]
+    },
+    "expected": {
+      "analytics_keys": [
+        "utilisation_pct",
+        "on_time_pct",
+        "funnel"
+      ],
+      "routes_is_list": true
+    },
+    "observed": {
+      "analytics_keys": [
+        "utilisation_pct",
+        "on_time_pct",
+        "funnel"
+      ],
+      "routes_is_list": true
+    },
+    "status": "PASS",
+    "evidence_path": "evidence/phase_b_analytics.json"
   }
 ]

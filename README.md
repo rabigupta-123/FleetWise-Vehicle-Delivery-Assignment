@@ -4,7 +4,7 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136.3-green.svg)](https://fastapi.tiangolo.com/)
 [![SQLite WAL](https://img.shields.io/badge/SQLite-WAL%20Mode-orange.svg)](https://www.sqlite.org/wal.html)
-[![Tests Passing](https://img.shields.io/badge/Tests-26%20Passed%20(100%25)-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/Tests-27%20Passed%20(100%25)-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 > **IT HAPPENS @ RAALE #13 (Logistics)**  
@@ -18,7 +18,7 @@
 |---|---|---|
 | **Sheshman Ahir** | **Team Leader** & Backend Development | Assignment logic, SQLite WAL transaction serialization (`BEGIN IMMEDIATE`), partial unique indexes, status transition matrix, smart advisor ranking |
 | **Sandip Sah** | Frontend Development & UI/UX Design | HUD / Control-room design system (`tokens.css`), 4-lane Kanban dispatch board, assignment modal, telemetry badges, Race Lab console, vendored SVG icons |
-| **Rabi Kumar Gupta** | Cybersecurity, Validation & QA | 2-phase CSV/JSON import pipeline, CSV injection escaping (`=,+,-,@`), XSS inert DOM sanitization, 26-test automated test suite, 50-thread race stress tests, forensic evidence collection |
+| **Rabi Kumar Gupta** | Cybersecurity, Validation & QA | 2-phase CSV/JSON import pipeline, CSV injection escaping (`=,+,-,@`), XSS inert DOM sanitization, 27-test automated test suite, 50-thread race stress tests, forensic evidence collection |
 
 ---
 
@@ -182,7 +182,7 @@ Execute the comprehensive automated test suite (verifying T1–T12, snapshot com
 pytest -v
 ```
 
-All **26 / 26 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
+All **27 / 27 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
 
 To re-run the Playwright browser judge flow:
 ```bash
@@ -190,42 +190,6 @@ python scripts/run_browser_judge_flow.py
 ```
 Outputs screenshots directly into [`evidence/screenshots_v2/`](evidence/screenshots_v2/).
 
----
+> **Note on Example Rows:** The CSV/JSON rows shown above are purely illustrative templates. FleetWise starts with a completely empty database; zero pre-seeded records exist. All records enter strictly via user import or interactive creation modals.
 
-## 4. User Data Import Formats
-
-FleetWise accepts CSV or JSON arrays for import:
-
-### Vehicles (`vehicles.csv`)
-```csv
-vehicle_id,registration_no,type,capacity,status
-V-001,KA-01-AB-1001,Refrigerated Van,1500,available
-V-002,KA-01-AB-1002,Heavy Freight,5000,available
-```
-
-### Drivers (`drivers.csv`)
-```csv
-driver_id,name,phone,availability_status
-DR-001,Aarav Sharma,+91-9876543210,available
-DR-002,Priya Nair,+91-9876543211,available
-```
-
-### Deliveries (`deliveries.csv`)
-```csv
-delivery_id,pickup,dropoff,scheduled_time,priority,required_capacity
-D-001,Central Hub Sector 4,Terminal B Cold Storage,2026-10-30T10:00:00Z,urgent,1000
-D-002,Warehouse 12,Cargo Gate 3,2026-10-30T11:30:00Z,normal,500
-```
-
----
-
-## 5. Verification & Testing
-
-Execute the comprehensive automated test suite (verifying T1–T12, snapshot comparisons, concurrency, and import validations against isolated temporary SQLite databases):
-
-```bash
-pytest -v
-```
-
-Machine-readable evidence is written to `evidence/test_results.json` and API response traces in `evidence/`.
 

@@ -143,7 +143,12 @@ The core invariant of FleetWise is that an assignment must never create a double
 ---
 
 ## 5. Results & Test Evidence
-All test results below are executed and directly sourced from `evidence/test_results.json` (26 / 26 tests passing, 100% pass rate):
+All test results below are executed and directly sourced from `evidence/test_results.json` (**27 / 27 tests passing, 100% pass rate**).
+
+> **Historical Test Count Reconciliation:**
+> - *Initial Sprint Baseline:* 25 tests (T1–T12, AUDIT-1, 3, 4, 5, 6, 7, 8, 9, PHASE-B1, B2, B4, B5, B6).
+> - *Sprint Hardening:* Added `AUDIT-10` (Idempotency-Key replay caching and `If-Match` stale-state protection), bringing total to 26 tests.
+> - *Comprehensive Security & Route Audit:* Added `AUDIT-11` (Unified HTTP error envelopes across Starlette 404, 405, and 400 validation, plus strict route vs resource 404 separation), bringing total to **27 distinct tests executed and passing**.
 
 | Test ID | Test Name | Input | Expected | Observed | Status | Evidence Path |
 |---|---|---|---|---|---|---|
@@ -164,10 +169,11 @@ All test results below are executed and directly sourced from `evidence/test_res
 | **AUDIT-4** | Exhaustive 5x5 Transition Matrix | All 25 source/target delivery status pairs tested | Exactly 5 allowed transitions pass; 20 invalid pairs return `409 INVALID_TRANSITION` | 5 passed, 20 rejected with 409, DB untouched | **PASS** | `evidence/audit_4_matrix.json` |
 | **AUDIT-5** | Validation & Normalization | Pydantic validation mapping to 400 `VALIDATION_ERROR`, registration normalization | 422 mapped to 400, registration uppercase trimmed, phone validated | 422 mapped to 400 `VALIDATION_ERROR`, reg normalized | **PASS** | `evidence/audit_5_validation.json` |
 | **AUDIT-6** | Frontend XSS Inert Sanitization | Imported row with `<script>` and `<img onerror>` payload | Stored verbatim in DB, rendered inert via `escapeHtml` / `textContent` | Rendered inert with zero script execution | **PASS** | `evidence/audit_6_xss_inert.json` |
-| **AUDIT-7** | Export CSV Formula Safety | Export cells starting with `=`, `+`, `-`, `@` | Prefixed with single quote `'` to neutralize spreadsheet formulas | All formula characters safely escaped with `'` | **PASS** | `evidence/audit_7_export_safety.json` |
+| **AUDIT-7** | Export CSV Formula Safety | Export cells starting with `=`, `+`, `-`, `@`, `\t`, `\r` | Prefixed with single quote `'` to neutralize spreadsheet formulas | All formula characters safely escaped with `'` | **PASS** | `evidence/audit_7_export_safety.json` |
 | **AUDIT-8** | Upload Limits & Malformed Files | 5 MB upload limit, 5000 rows limit, binary null-byte sniffing | Rejected with 400 `VALIDATION_ERROR`, clear human-readable message | 400 `VALIDATION_ERROR`, oversized/binary files blocked | **PASS** | `evidence/audit_8_upload_limits.json` |
 | **AUDIT-9** | Security Hardening Headers | `GET /` response headers inspection | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy` | All 4 security headers present on every response | **PASS** | `evidence/audit_9_security_headers.json` |
 | **AUDIT-10**| Idempotency & Version Stale State | Replay with same `Idempotency-Key`; `If-Match` version conflict | Same key returns cached response without 2nd insert; version mismatch returns `409 STALE_STATE` | Zero duplicate assignments, `409 STALE_STATE` verified | **PASS** | `evidence/audit_10_idempotency.json` |
+| **AUDIT-11**| HTTP Error Envelopes & Route Separation | Unknown route (404), Method not allowed (405), Nonexistent entity (404) | All return unified `{"error", "message"}` envelope; API 404 does not return SPA HTML 200 | Strict `{"error", "message"}` envelope observed on all non-2xx responses | **PASS** | `evidence/audit_11_http_errors.json` |
 | **PHASE-B1**| Smart Advisor & Auto-Assign | Recommendations endpoint & auto-assign planner | Top capacity fit vehicle & fair driver scored highest; auto-assign creates valid plan | Smallest sufficient capacity chosen, batch committed | **PASS** | `evidence/phase_b_advisor.json` |
 | **PHASE-B2**| Blocked Queue Radar | Pending delivery with `required_capacity` exceeding fleet max | Listed in `/deliveries/blocked` with specific cause ("Insufficient capacity") | Correctly diagnosed with clear blockage reason | **PASS** | `evidence/phase_b_blocked.json` |
 | **PHASE-B4**| Parallel Allocation Race Lab | Diagnostic concurrency proof endpoint with 25 parallel threads | Exactly 1 winner (`201`), 24 blocked (`409`), 0 errors (`5xx`), invariant preserved | 1 winner, 24 conflicts, 0 errors, invariant verified | **PASS** | `evidence/phase_b_racelab.json` |

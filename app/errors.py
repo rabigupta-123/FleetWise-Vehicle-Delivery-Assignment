@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class AppError(Exception):
@@ -36,3 +37,33 @@ def register_exception_handlers(app: FastAPI) -> None:
             content={"error": "VALIDATION_ERROR", "message": message},
         )
 
+    @app.exception_handler(StarletteHTTPException)
+    async def starlette_http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        code_map = {
+            404: "NOT_FOUND",
+            405: "METHOD_NOT_ALLOWED",
+            400: "BAD_REQUEST",
+            401: "UNAUTHORIZED",
+            403: "FORBIDDEN",
+            409: "CONFLICT",
+            415: "UNSUPPORTED_MEDIA_TYPE",
+            429: "TOO_MANY_REQUESTS",
+            500: "INTERNAL_SERVER_ERROR",
+        }
+        err_code = code_map.get(exc.status_code, "HTTP_ERROR")
+        detail_msg = exc.detail if exc.detail else "An HTTP error occurred."
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": err_code, "message": str(detail_msg)},
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "INTERNAL_SERVER_ERROR", "message": "An unexpected server error occurred."},
+        )

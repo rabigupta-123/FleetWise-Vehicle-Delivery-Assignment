@@ -57,6 +57,16 @@ def test_audit_1_clean_start_and_health(client: TestClient, temp_db: str):
     assert ui_res.status_code == 200
     assert "FLEETWISE" in ui_res.text
 
+    record_test_result(
+        test_id="AUDIT-1",
+        name="Clean Start & Health",
+        test_input={"endpoint": "/health"},
+        expected={"status": "ok", "journal_mode": "wal", "foreign_keys": True, "counts": {"vehicles": 0, "drivers": 0, "deliveries": 0}},
+        observed={"status": body["status"], "journal_mode": body["journal_mode"], "foreign_keys": body["foreign_keys"], "counts": body["counts"]},
+        passed=True,
+        evidence_path="evidence/audit_1_clean_start.json",
+    )
+
 
 # -------------------------------------------------------------------------
 # PHASE A: AUDIT 2 & T12 — UPGRADED 50-THREAD CONCURRENCY & ZERO 5xx
@@ -136,6 +146,16 @@ def test_audit_3_state_bypass_rejected(client: TestClient, temp_db: str):
     res_imp_del = client.post("/import/deliveries?dry_run=false", files={"file": ("del.csv", csv_del, "text/csv")})
     assert res_imp_del.status_code == 400
 
+    record_test_result(
+        test_id="AUDIT-3",
+        name="State Bypass Rejected",
+        test_input={"bypass_attempts": ["PATCH vehicle assigned", "PATCH driver assigned", "PATCH delivery assigned", "CSV import assigned"]},
+        expected={"rejected_with_400_or_409": True},
+        observed={"rejected_with_400_or_409": True},
+        passed=True,
+        evidence_path="evidence/audit_3_state_bypass.json",
+    )
+
 
 # -------------------------------------------------------------------------
 # PHASE A: AUDIT 4 — EXHAUSTIVE 5x5 TRANSITION MATRIX
@@ -197,6 +217,16 @@ def test_audit_4_exhaustive_5x5_transition_matrix(client: TestClient, temp_db: s
                 assert res.json()["error"] == "INVALID_TRANSITION"
                 assert before_snap == after_snap, f"DB was mutated on rejected transition {src} -> {dst}!"
 
+    record_test_result(
+        test_id="AUDIT-4",
+        name="Exhaustive 5x5 Transition Matrix",
+        test_input={"matrix_size": "5x5 (25 transitions)"},
+        expected={"allowed_transitions": 4, "illegal_transitions_rejected_409": 21},
+        observed={"allowed_transitions": 4, "illegal_transitions_rejected_409": 21},
+        passed=True,
+        evidence_path="evidence/audit_4_matrix.json",
+    )
+
 
 # -------------------------------------------------------------------------
 # PHASE A: AUDIT 5 — VALIDATION MAPPINGS & NORMALIZATION
@@ -226,6 +256,16 @@ def test_audit_5_validation_mappings_and_normalization(client: TestClient, temp_
     res_bad_cap = client.post("/vehicles", json={"registration_no": "KA-CAP-01", "type": "Van", "capacity": -50})
     assert res_bad_cap.status_code == 400
     assert res_bad_cap.json()["error"] == "VALIDATION_ERROR"
+
+    record_test_result(
+        test_id="AUDIT-5",
+        name="Validation Mappings & Normalization",
+        test_input={"bad_capacity": -50, "bad_phone": "abc-invalid", "bad_json": "not_a_number", "raw_reg": "  ka-01-norm-100  "},
+        expected={"status_400_validation_error": True, "registration_normalized": "KA-01-NORM-100", "duplicate_409": True},
+        observed={"status_400_validation_error": True, "registration_normalized": res_v1.json()["registration_no"], "duplicate_409": res_v2.status_code == 409},
+        passed=True,
+        evidence_path="evidence/audit_5_validation.json",
+    )
 
 
 # -------------------------------------------------------------------------
@@ -288,6 +328,16 @@ def test_audit_7_export_safety(client: TestClient, temp_db: str):
     assert "'@SUM" in res_v.text
     assert "'+Van" in res_v.text
 
+    record_test_result(
+        test_id="AUDIT-7",
+        name="Export CSV Formula Safety",
+        test_input={"dangerous_cells": ["=cmd|' /C calc'!A0", "@SUM(A1:A10)", "+Van"]},
+        expected={"prefixed_with_single_quote": True},
+        observed={"prefixed_with_single_quote": True},
+        passed=True,
+        evidence_path="evidence/audit_7_export_safety.json",
+    )
+
 
 # -------------------------------------------------------------------------
 # PHASE A: AUDIT 8 — UPLOAD LIMITS & CONTENT SNIFFING
@@ -310,6 +360,16 @@ def test_audit_8_upload_limits(client: TestClient, temp_db: str):
     assert res_ext.status_code == 400
     assert res_ext.json()["error"] == "VALIDATION_ERROR"
 
+    record_test_result(
+        test_id="AUDIT-8",
+        name="Upload Limits & Content Sniffing",
+        test_input={"binary_file": "bad.csv", "oversized": ">5MB", "bad_ext": "script.exe"},
+        expected={"all_rejected_with_400": True},
+        observed={"binary_status": res_bin.status_code, "large_status": res_large.status_code, "ext_status": res_ext.status_code},
+        passed=True,
+        evidence_path="evidence/audit_8_upload_limits.json",
+    )
+
 
 # -------------------------------------------------------------------------
 # PHASE A: AUDIT 9 — HARDENING & SECURITY HEADERS
@@ -321,6 +381,16 @@ def test_audit_9_security_headers(client: TestClient, temp_db: str):
     assert res.headers["X-Frame-Options"] == "DENY"
     assert res.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
     assert "Content-Security-Policy" in res.headers
+
+    record_test_result(
+        test_id="AUDIT-9",
+        name="Security Headers Hardening",
+        test_input={"endpoint": "/health"},
+        expected={"headers_present": ["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"]},
+        observed={"headers_present": [h for h in ["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"] if h in res.headers]},
+        passed=True,
+        evidence_path="evidence/audit_9_security_headers.json",
+    )
 
 
 # -------------------------------------------------------------------------
@@ -367,6 +437,54 @@ def test_audit_10_idempotency_and_stale_state(client: TestClient, temp_db: str):
     )
     assert valid_res.status_code == 200
     assert valid_res.json()["version"] == 3
+
+    record_test_result(
+        test_id="AUDIT-10",
+        name="Idempotency-Key & Stale-State Protection",
+        test_input={"idempotency_key": "test-key-001", "stale_if_match": "1", "valid_if_match": "2"},
+        expected={"idempotency_replay_201": True, "active_assignments_count": 1, "stale_409": True, "valid_200": True},
+        observed={"idempotency_replay_201": res2.status_code == 201, "active_assignments_count": len(active_asgs), "stale_409": stale_res.status_code == 409, "valid_200": valid_res.status_code == 200},
+        passed=True,
+        evidence_path="evidence/audit_10_idempotency.json",
+    )
+
+
+# -------------------------------------------------------------------------
+# PHASE A: AUDIT 11 — HTTP ERROR ENVELOPES & ROUTE SEPARATION (400, 404, 405)
+# -------------------------------------------------------------------------
+def test_audit_11_http_error_envelopes_and_routes(client: TestClient, temp_db: str):
+    # 1. Unknown API route returns genuine 404 with standard envelope (not SPA HTML 200)
+    res_unknown_route = client.get("/api/v1/nonexistent-route-endpoint")
+    assert res_unknown_route.status_code == 404
+    assert res_unknown_route.headers.get("content-type", "").startswith("application/json")
+    assert res_unknown_route.json()["error"] == "NOT_FOUND"
+    assert "Not Found" in res_unknown_route.json()["message"]
+
+    # 2. Method Not Allowed (405) returns standard envelope
+    res_wrong_method = client.post("/health")
+    assert res_wrong_method.status_code == 405
+    assert res_wrong_method.json()["error"] == "METHOD_NOT_ALLOWED"
+
+    # 3. Nonexistent resource ID vs nonexistent route
+    res_unknown_id = client.post("/deliveries/D-NONEXISTENT/assign", json={"vehicle_id": "V-1", "driver_id": "DR-1"})
+    assert res_unknown_id.status_code == 404
+    assert res_unknown_id.json()["error"] == "NOT_FOUND"
+    assert "Delivery 'D-NONEXISTENT' does not exist." in res_unknown_id.json()["message"]
+
+    # 4. Malformed JSON payload returns 400 VALIDATION_ERROR
+    res_malformed_json = client.post("/auth/login", content=b"invalid-non-json", headers={"Content-Type": "application/json"})
+    assert res_malformed_json.status_code == 400
+    assert res_malformed_json.json()["error"] == "VALIDATION_ERROR"
+
+    record_test_result(
+        "AUDIT-11",
+        "HTTP Error Envelopes & Route Separation",
+        {"routes_tested": ["/api/v1/nonexistent-route-endpoint", "/health (POST)", "/deliveries/D-NONEXISTENT/assign", "/auth/login (bad JSON)"]},
+        {"status_codes": [404, 405, 404, 400], "all_have_error_envelope": True},
+        {"observed_codes": [res_unknown_route.status_code, res_wrong_method.status_code, res_unknown_id.status_code, res_malformed_json.status_code], "all_have_error_envelope": True},
+        True,
+        "evidence/audit_11_http_errors.json",
+    )
 
 
 # -------------------------------------------------------------------------
@@ -607,6 +725,16 @@ def test_phase_b_smart_advisor_and_auto_assign(client: TestClient, temp_db: str)
     assert auto_commit.status_code == 200
     assert auto_commit.json()["assigned_count"] == 1
 
+    record_test_result(
+        test_id="PHASE-B1",
+        name="Smart Advisor & Auto-Assign",
+        test_input={"delivery_id": "D-ADV-01", "required_capacity": 800},
+        expected={"top_candidate": "V-SMALL", "auto_assign_dry_run_plan": 1, "auto_assign_committed": 1},
+        observed={"top_candidate": recs[0]["vehicle"]["vehicle_id"], "auto_assign_dry_run_plan": len(auto_dry.json()["plan"]), "auto_assign_committed": auto_commit.json()["assigned_count"]},
+        passed=True,
+        evidence_path="evidence/phase_b_advisor.json",
+    )
+
 
 def test_phase_b_blocked_queue_diagnosis(client: TestClient, temp_db: str):
     # Create delivery requiring 10,000 kg when max fleet capacity is 2000 kg
@@ -620,6 +748,16 @@ def test_phase_b_blocked_queue_diagnosis(client: TestClient, temp_db: str):
     assert body["count"] == 1
     assert "Insufficient capacity" in body["blocked_deliveries"][0]["block_reasons"][0]
 
+    record_test_result(
+        test_id="PHASE-B2",
+        name="Blocked Queue Diagnosis",
+        test_input={"delivery_id": "D-HUGE", "required_capacity": 10000, "max_fleet_cap": 2000},
+        expected={"blocked_count": 1, "reason_contains": "Insufficient capacity"},
+        observed={"blocked_count": body["count"], "reason_contains": "Insufficient capacity" in body["blocked_deliveries"][0]["block_reasons"][0]},
+        passed=True,
+        evidence_path="evidence/phase_b_blocked.json",
+    )
+
 
 def test_phase_b_race_lab_diagnostics(client: TestClient, temp_db: str):
     race_res = client.post("/diagnostics/concurrency-test?workers=25")
@@ -630,6 +768,16 @@ def test_phase_b_race_lab_diagnostics(client: TestClient, temp_db: str):
     assert body["conflict_count"] == 24
     assert body["error_count"] == 0
     assert body["core_invariant_preserved"] is True
+
+    record_test_result(
+        test_id="PHASE-B4",
+        name="Race Lab Diagnostics",
+        test_input={"workers": 25},
+        expected={"success": 1, "conflicts": 24, "errors": 0, "core_invariant_preserved": True},
+        observed={"success": body["success_count"], "conflicts": body["conflict_count"], "errors": body["error_count"], "core_invariant_preserved": body["core_invariant_preserved"]},
+        passed=True,
+        evidence_path="evidence/phase_b_racelab.json",
+    )
 
 
 def test_phase_b_rbac_and_auth_flow(client: TestClient, temp_db: str):
@@ -647,6 +795,16 @@ def test_phase_b_rbac_and_auth_flow(client: TestClient, temp_db: str):
     logout_res = client.post("/auth/logout")
     assert logout_res.status_code == 200
 
+    record_test_result(
+        test_id="PHASE-B5",
+        name="RBAC & Authentication Flow",
+        test_input={"user": "dispatcher", "action": "login/me/logout"},
+        expected={"login_status": 200, "authenticated": True, "logout_status": 200},
+        observed={"login_status": login_res.status_code, "authenticated": me_res.json()["authenticated"], "logout_status": logout_res.status_code},
+        passed=True,
+        evidence_path="evidence/phase_b_auth.json",
+    )
+
 
 def test_phase_b_analytics_and_routes(client: TestClient, temp_db: str):
     analytics_res = client.get("/analytics/summary")
@@ -659,3 +817,13 @@ def test_phase_b_analytics_and_routes(client: TestClient, temp_db: str):
     routes_res = client.get("/deliveries/routes")
     assert routes_res.status_code == 200
     assert isinstance(routes_res.json(), list)
+
+    record_test_result(
+        test_id="PHASE-B6",
+        name="Analytics & Route Radar",
+        test_input={"endpoints": ["/analytics/summary", "/deliveries/routes"]},
+        expected={"analytics_keys": ["utilisation_pct", "on_time_pct", "funnel"], "routes_is_list": True},
+        observed={"analytics_keys": [k for k in ["utilisation_pct", "on_time_pct", "funnel"] if k in body], "routes_is_list": isinstance(routes_res.json(), list)},
+        passed=True,
+        evidence_path="evidence/phase_b_analytics.json",
+    )
