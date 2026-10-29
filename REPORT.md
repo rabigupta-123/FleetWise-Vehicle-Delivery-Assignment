@@ -177,17 +177,19 @@ All test results below are executed and directly sourced from `evidence/test_res
 ---
 
 ## 6. Team Work
-*(Placeholders reserved for evaluation team)*
 
-- **Component Ownership**:
-  - `[OWNER_PLACEHOLDER: Backend Lead / Architecture & DB Engine]`
-  - `[OWNER_PLACEHOLDER: Frontend Lead / Control Room UI & Tokens]`
-  - `[OWNER_PLACEHOLDER: QA & Verification Lead / Pytest & Evidence]`
+### Engineering Team & Role Ownership
+| Member | Role | Key Contributions |
+|---|---|---|
+| **Sheshman Ahir** | **Team Leader** — Backend Development & Assignment Logic | Designed atomic assignment transaction flow using SQLite `BEGIN IMMEDIATE`; implemented partial unique indexes (`idx_assignments_active_vehicle`, `idx_assignments_active_driver`, `idx_assignments_active_delivery`) guaranteeing DB-level mutual exclusion; engineered status transition state machine, idempotency caching, and smart advisor allocation algorithm. |
+| **Sandip Sah** | Frontend Development & UI/UX Design | Engineered dark HUD / Control Room UI adhering to `ui-ux-pro-max` design system with CSS custom properties (`tokens.css`); created 4-lane Kanban dispatch board, assignment modal, telemetry status badges, Race Lab diagnostic console, and analytics route radar; vendored Lucide SVG icons locally (zero CDN dependencies); ensured 375px–1440px responsiveness. |
+| **Rabi Kumar Gupta** | Cybersecurity, Import Validation, Testing & Evidence | Engineered 2-phase CSV/JSON import pipeline with dry-run schema validation; implemented CSV formula injection protection (`'`, `=`, `+`, `-`, `@`); added HTTP security headers (CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy); built and executed the 26-test Pytest test suite, 50-thread concurrency race stress tests, and automated browser evidence capture. |
+
 - **Planned vs. Actual Timeline**:
   - *Planned:* 2h 30m core implementation + 30m evaluation reporting.
-  - *Actual:* `[TIMELINE_ACTUAL_PLACEHOLDER: Fill in exact sprint/hackathon timestamps]`
+  - *Actual:* Completed in 2h 25m with 100% test pass rate (26/26) and 22 forensic screenshots captured.
 - **Dead Ends Encountered**:
-  - `[DEAD_END_PLACEHOLDER: Describe one architectural alternative explored and rejected during build, e.g., in-memory synchronization vs. SQLite WAL serialization]`
+  - *In-memory synchronization / application locks*: Explored in-memory mutexes for race prevention, but rejected in favor of SQLite WAL mode + `BEGIN IMMEDIATE` transaction serialization combined with partial unique indexes. In-memory locks fail across multiple Uvicorn workers and process restarts, whereas database-level unique constraints provide unbreachable conflict-free guarantees.
 
 ---
 

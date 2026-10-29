@@ -11,6 +11,16 @@
 
 ---
 
+## 👥 Engineering Team & Role Ownership
+
+| Member | Role | Primary Responsibilities |
+|---|---|---|
+| **Sheshman Ahir** | **Team Leader** & Backend Development | Assignment logic, SQLite WAL transaction serialization (`BEGIN IMMEDIATE`), partial unique indexes, status transition matrix, smart advisor ranking |
+| **Sandip Sah** | Frontend Development & UI/UX Design | HUD / Control-room design system (`tokens.css`), 4-lane Kanban dispatch board, assignment modal, telemetry badges, Race Lab console, vendored SVG icons |
+| **Rabi Kumar Gupta** | Cybersecurity, Validation & QA | 2-phase CSV/JSON import pipeline, CSV injection escaping (`=,+,-,@`), XSS inert DOM sanitization, 26-test automated test suite, 50-thread race stress tests, forensic evidence collection |
+
+---
+
 ## Visual Tour
 
 | Command Center (Telemetry & 4-Lane Board) | Dispatch Console (Atomic Assignment) |
