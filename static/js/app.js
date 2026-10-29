@@ -36,6 +36,8 @@ const STATE = {
   pollTimer: null,
   topRecommendation: null,
   blockedQueue: [],
+  selectedTrackingVehicleId: null,
+  selectedTrackingDeliveryId: null,
 };
 
 const VIEW_META = {
@@ -74,6 +76,18 @@ const VIEW_META = {
   routes: {
     title: 'Route Radar Visualizer',
     subtitle: 'Active delivery pickup and dropoff corridors and transit trajectory canvas',
+  },
+  'vehicle-tracking': {
+    title: 'Vehicle Live GPS Radar',
+    subtitle: 'Real-time vehicle position, accuracy circles, movement breadcrumb trails & Street View',
+  },
+  'delivery-tracking': {
+    title: 'Delivery Transit Tracking',
+    subtitle: 'Corridor monitoring, planned route vs real driver GPS trail, and street-level vantage',
+  },
+  'driver-gps': {
+    title: 'Driver Phone GPS Portal',
+    subtitle: 'Smartphone browser HTML5 Geolocation streaming with live velocity and precision gauges',
   },
   audit: {
     title: 'System Audit Log',
@@ -219,6 +233,12 @@ async function refreshAllData(silent = false) {
       renderAnalytics();
     } else if (STATE.activeView === 'routes') {
       renderRouteRadar();
+    } else if (STATE.activeView === 'vehicle-tracking') {
+      renderVehicleTracking();
+    } else if (STATE.activeView === 'delivery-tracking') {
+      renderDeliveryTracking();
+    } else if (STATE.activeView === 'driver-gps') {
+      renderDriverGpsPortal();
     }
 
     const nowStr = new Date().toLocaleTimeString([], { hour12: false });
@@ -778,11 +798,17 @@ function renderDriversTable() {
         <tr>
           <td class="mono"><strong>${escapeHtml(d.driver_id)}</strong></td>
           <td>${escapeHtml(d.name)}</td>
-          <td class="mono">${escapeHtml(d.phone)}</td>
+          <td class="mono">
+            <span>${escapeHtml(d.phone)}</span>
+            <button type="button" class="btn btn-ghost btn-xs ml-xs" data-edit-phone="${escapeHtml(d.driver_id)}" title="Update Phone for Live GPS Testing" style="padding:1px 5px; font-size:11px; margin-left:6px;">
+              ${icon('edit', 10)}
+            </button>
+          </td>
           <td>${statusBadgeHtml(d.availability_status)}</td>
           <td>${activeDel}</td>
           <td class="text-right">
             <div style="display:inline-flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
+              <button type="button" class="btn btn-ghost btn-xs" data-edit-phone="${escapeHtml(d.driver_id)}">Edit Phone</button>
               <button type="button" class="btn btn-ghost btn-xs" data-driver-status="${escapeHtml(d.driver_id)}" data-status="available" ${d.availability_status === 'available' ? 'disabled' : ''}>Set Available</button>
               <button type="button" class="btn btn-ghost btn-xs" data-driver-status="${escapeHtml(d.driver_id)}" data-status="unavailable" ${d.availability_status === 'unavailable' ? 'disabled' : ''}>Set Unavailable</button>
             </div>
@@ -847,6 +873,12 @@ function switchView(viewName) {
     renderAnalytics();
   } else if (viewName === 'routes') {
     renderRouteRadar();
+  } else if (viewName === 'vehicle-tracking') {
+    renderVehicleTracking();
+  } else if (viewName === 'delivery-tracking') {
+    renderDeliveryTracking();
+  } else if (viewName === 'driver-gps') {
+    renderDriverGpsPortal();
   }
 }
 
@@ -1019,6 +1051,9 @@ const COMMANDS = [
   { label: 'Go to Fleet Analytics', action: () => switchView('analytics'), kbd: 'Y' },
   { label: 'Go to Route Radar Visualizer', action: () => switchView('routes'), kbd: 'M' },
   { label: 'Go to Audit Log', action: () => switchView('audit'), kbd: 'A' },
+  { label: 'Go to Vehicle Live GPS Radar', action: () => switchView('vehicle-tracking'), kbd: '6' },
+  { label: 'Go to Delivery Transit Tracking', action: () => switchView('delivery-tracking'), kbd: '7' },
+  { label: 'Go to Driver Phone GPS Portal', action: () => switchView('driver-gps'), kbd: '8' },
   { label: 'Create New Delivery Order', action: () => openModal('modal-delivery'), kbd: 'N' },
   { label: 'Register New Fleet Vehicle', action: () => openModal('modal-vehicle'), kbd: 'V' },
   { label: 'Register New Driver', action: () => openModal('modal-driver'), kbd: 'D' },
@@ -1209,6 +1244,721 @@ async function renderRouteRadar() {
   } catch {}
 }
 
+/* ==================== REAL GPS TRACKING & TELEMETRY ==================== */
+const TRACKING_STATE = {
+  activeSessionId: null,
+  activeDriverId: null,
+  watchId: null,
+  fixCount: 0,
+  lastFix: null,
+};
+
+const MAPS = {
+  'vehicle-map': null,
+  'delivery-map': null,
+  'driver-mini-map': null,
+  layers: {
+    'vehicle-map': {},
+    'delivery-map': {},
+    'driver-mini-map': {},
+  },
+};
+
+function getOrCreateLeafletMap(containerId, center = [12.9716, 77.5946], zoom = 13) {
+  if (typeof window.L === 'undefined') {
+    console.warn('Leaflet engine is not ready.');
+    return null;
+  }
+  const el = document.getElementById(containerId);
+  if (!el) return null;
+
+  if (MAPS[containerId]) {
+    setTimeout(() => {
+      try {
+        MAPS[containerId].invalidateSize();
+      } catch {}
+    }, 60);
+    return MAPS[containerId];
+  }
+
+  try {
+    const map = window.L.map(containerId, {
+      attributionControl: false,
+      zoomControl: true,
+      fadeAnimation: true,
+    }).setView(center, zoom);
+
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      subdomains: ['a', 'b', 'c'],
+    }).addTo(map);
+
+    window.L.control.attribution({ position: 'bottomright', prefix: false })
+      .addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>')
+      .addTo(map);
+
+    MAPS[containerId] = map;
+    MAPS.layers[containerId] = {};
+    setTimeout(() => {
+      try {
+        map.invalidateSize();
+      } catch {}
+    }, 100);
+    return map;
+  } catch (err) {
+    console.error('Error initializing Leaflet map:', err);
+    return null;
+  }
+}
+
+function createMapMarkerIcon(type = 'vehicle') {
+  if (typeof window.L === 'undefined') return null;
+  const isVeh = type === 'vehicle';
+  const isDel = type === 'delivery';
+  const color = isVeh ? '#00FF41' : (isDel ? '#00E5FF' : '#FFB000');
+  const innerSvg = isVeh
+    ? `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="background:#0D1117; padding:4px; border-radius:50%; border:2px solid ${color}; box-shadow:0 0 10px ${color};"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>`
+    : `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="background:#0D1117; padding:4px; border-radius:50%; border:2px solid ${color}; box-shadow:0 0 10px ${color};"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`;
+
+  return window.L.divIcon({
+    html: innerSvg,
+    className: 'custom-map-marker',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
+  });
+}
+
+function renderTelemetrySvg(containerId, telemetryData) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const points = (telemetryData && telemetryData.points) || [];
+  if (points.length === 0) {
+    container.innerHTML = `
+      <div class="lane-empty" style="padding:40px 0;">
+        <div>No telemetry GPS fixes recorded yet. Real telemetry will graph here once fixes stream in.</div>
+      </div>
+    `;
+    return;
+  }
+
+  const width = 680;
+  const height = 150;
+  const padL = 45;
+  const padR = 45;
+  const padT = 20;
+  const padB = 25;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+
+  let maxSpeed = 30;
+  let maxAcc = 25;
+  points.forEach((p) => {
+    if (p.speed_kmh != null && p.speed_kmh > maxSpeed) maxSpeed = p.speed_kmh;
+    if (p.accuracy_m != null && p.accuracy_m > maxAcc) maxAcc = p.accuracy_m;
+  });
+  maxSpeed = Math.ceil(maxSpeed * 1.15);
+  maxAcc = Math.ceil(maxAcc * 1.15);
+
+  const getX = (idx) => {
+    if (points.length === 1) return padL + plotW / 2;
+    return padL + (idx / (points.length - 1)) * plotW;
+  };
+  const getSpeedY = (spd) => {
+    const val = spd != null ? spd : 0;
+    return padT + plotH - (val / maxSpeed) * plotH;
+  };
+  const getAccY = (acc) => {
+    const val = acc != null ? acc : 0;
+    return padT + plotH - (val / maxAcc) * plotH;
+  };
+
+  const speedCoords = points.map((p, idx) => [getX(idx), getSpeedY(p.speed_kmh)]);
+  const accCoords = points.map((p, idx) => [getX(idx), getAccY(p.accuracy_m)]);
+
+  const speedPathD = speedCoords.length > 1
+    ? speedCoords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c[0].toFixed(1)} ${c[1].toFixed(1)}`).join(' ')
+    : '';
+
+  const speedFillD = speedCoords.length > 1
+    ? `${speedPathD} L ${speedCoords[speedCoords.length - 1][0].toFixed(1)} ${(padT + plotH).toFixed(1)} L ${speedCoords[0][0].toFixed(1)} ${(padT + plotH).toFixed(1)} Z`
+    : '';
+
+  const accPathD = accCoords.length > 1
+    ? accCoords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c[0].toFixed(1)} ${c[1].toFixed(1)}`).join(' ')
+    : '';
+
+  let svgHtml = `
+    <svg viewBox="0 0 ${width} ${height}" style="width:100%; height:auto; display:block; background:#0B0E14; border-radius:var(--radius-sm);">
+      <defs>
+        <linearGradient id="spdGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#00FF41" stop-opacity="0.28" />
+          <stop offset="100%" stop-color="#00FF41" stop-opacity="0.0" />
+        </linearGradient>
+      </defs>
+      <!-- Horizontal Grid Lines -->
+      <line x1="${padL}" y1="${padT}" x2="${width - padR}" y2="${padT}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="2 2" />
+      <line x1="${padL}" y1="${padT + plotH / 2}" x2="${width - padR}" y2="${padT + plotH / 2}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="2 2" />
+      <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="rgba(255,255,255,0.15)" />
+
+      <!-- Left Axis (Speed) Labels -->
+      <text x="${padL - 6}" y="${padT + 4}" font-family="var(--font-mono)" font-size="9" fill="#00FF41" text-anchor="end">${maxSpeed}</text>
+      <text x="${padL - 6}" y="${padT + plotH / 2 + 3}" font-family="var(--font-mono)" font-size="9" fill="#00FF41" text-anchor="end">${Math.round(maxSpeed / 2)}</text>
+      <text x="${padL - 6}" y="${padT + plotH + 2}" font-family="var(--font-mono)" font-size="9" fill="#00FF41" text-anchor="end">0</text>
+
+      <!-- Right Axis (Accuracy) Labels -->
+      <text x="${width - padR + 6}" y="${padT + 4}" font-family="var(--font-mono)" font-size="9" fill="#00E5FF" text-anchor="start">±${maxAcc}m</text>
+      <text x="${width - padR + 6}" y="${padT + plotH + 2}" font-family="var(--font-mono)" font-size="9" fill="#00E5FF" text-anchor="start">0m</text>
+
+      <!-- Speed Area & Line -->
+      ${speedFillD ? `<path d="${speedFillD}" fill="url(#spdGrad)" />` : ''}
+      ${speedPathD ? `<path d="${speedPathD}" fill="none" stroke="#00FF41" stroke-width="2.2" />` : ''}
+
+      <!-- Accuracy Line -->
+      ${accPathD ? `<path d="${accPathD}" fill="none" stroke="#00E5FF" stroke-width="1.8" stroke-dasharray="4 3" />` : ''}
+
+      <!-- Data Dots -->
+      ${speedCoords.map((c, i) => `<circle cx="${c[0].toFixed(1)}" cy="${c[1].toFixed(1)}" r="3" fill="#00FF41"><title>Speed: ${points[i].speed_kmh != null ? points[i].speed_kmh : 0} km/h</title></circle>`).join('')}
+
+      <!-- Legend -->
+      <g transform="translate(${padL + 10}, 12)">
+        <line x1="0" y1="0" x2="16" y2="0" stroke="#00FF41" stroke-width="2" />
+        <circle cx="8" cy="0" r="2.5" fill="#00FF41" />
+        <text x="22" y="3" font-family="var(--font-mono)" font-size="10" fill="#00FF41">Speed (km/h)</text>
+
+        <line x1="120" y1="0" x2="136" y2="0" stroke="#00E5FF" stroke-width="1.8" stroke-dasharray="3 2" />
+        <text x="142" y="3" font-family="var(--font-mono)" font-size="10" fill="#00E5FF">Accuracy (m)</text>
+      </g>
+    </svg>
+  `;
+
+  container.innerHTML = svgHtml;
+}
+
+/* --- Vehicle Live GPS Tracking --- */
+function renderVehicleTracking() {
+  const select = document.getElementById('veh-tracking-select');
+  if (!select) return;
+
+  const currentVal = select.value || STATE.selectedTrackingVehicleId || '';
+  select.innerHTML = '<option value="">-- Choose a Fleet Vehicle --</option>' +
+    STATE.vehicles
+      .map((v) => {
+        const isSel = v.vehicle_id === currentVal ? 'selected' : '';
+        return `<option value="${escapeHtml(v.vehicle_id)}" ${isSel}>${escapeHtml(v.vehicle_id)} (${escapeHtml(v.registration_no)}) &bull; ${escapeHtml(v.type)} [${escapeHtml(v.status)}]</option>`;
+      })
+      .join('');
+
+  if (currentVal && STATE.vehicles.some((v) => v.vehicle_id === currentVal)) {
+    loadVehicleTrackingData(currentVal);
+  } else if (STATE.vehicles.length > 0 && !currentVal) {
+    select.value = STATE.vehicles[0].vehicle_id;
+    loadVehicleTrackingData(STATE.vehicles[0].vehicle_id);
+  }
+}
+
+async function loadVehicleTrackingData(vehicleId, silent = false) {
+  if (!vehicleId) return;
+  STATE.selectedTrackingVehicleId = vehicleId;
+  const infoEl = document.getElementById('veh-tracking-info');
+  const graphStatsEl = document.getElementById('veh-graph-stats');
+
+  try {
+    const [latestRes, historyRes, telemetryRes] = await Promise.all([
+      apiRequest(`/tracking/vehicles/${encodeURIComponent(vehicleId)}/latest`),
+      apiRequest(`/tracking/history?vehicle_id=${encodeURIComponent(vehicleId)}&limit=100`),
+      apiRequest(`/tracking/telemetry-graph?vehicle_id=${encodeURIComponent(vehicleId)}`),
+    ]);
+
+    const vehicle = latestRes.vehicle || STATE.vehicles.find((v) => v.vehicle_id === vehicleId) || { vehicle_id: vehicleId };
+    const latest = latestRes.latest_location;
+    const isLive = latestRes.is_live;
+    const isStale = latestRes.is_stale;
+    const statusText = isLive ? 'LIVE' : (isStale ? 'STALE' : 'OFFLINE');
+    const statusClass = isLive ? 'status-live' : (isStale ? 'status-stale' : 'status-inactive');
+
+    // Render left panel info
+    if (infoEl) {
+      const driver = latestRes.assigned_driver;
+      const delivery = latestRes.active_delivery;
+      const streetViewBtn = latestRes.street_view_url
+        ? `<a href="${escapeHtml(latestRes.street_view_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm streetview-btn" style="width:100%; justify-content:center; margin-top:var(--space-md);">${icon('navigation', 14)}<span>Open Google Maps Street View</span></a>`
+        : '';
+
+      infoEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-md);">
+          <div>
+            <span class="mono font-bold" style="font-size:16px;">${escapeHtml(vehicle.registration_no || vehicle.vehicle_id)}</span>
+            <div class="kpi-sub">${escapeHtml(vehicle.vehicle_id)} &bull; ${escapeHtml(vehicle.type || 'Van')} &bull; Cap: ${escapeHtml(vehicle.capacity || '—')}</div>
+          </div>
+          <span class="status-badge ${statusClass}">${statusText}</span>
+        </div>
+
+        <div class="telemetry-cards mb-md">
+          <div class="telemetry-card">
+            <span class="telemetry-label">Latitude</span>
+            <span class="telemetry-value" style="font-size:13px;">${latest ? latest.latitude.toFixed(6) : '—'}</span>
+          </div>
+          <div class="telemetry-card">
+            <span class="telemetry-label">Longitude</span>
+            <span class="telemetry-value" style="font-size:13px;">${latest ? latest.longitude.toFixed(6) : '—'}</span>
+          </div>
+          <div class="telemetry-card">
+            <span class="telemetry-label">Speed</span>
+            <span class="telemetry-value" style="font-size:13px;">${latest && latest.speed_kmh != null ? latest.speed_kmh.toFixed(1) : '0.0'}</span>
+            <span class="telemetry-sub">km / h</span>
+          </div>
+          <div class="telemetry-card">
+            <span class="telemetry-label">Accuracy</span>
+            <span class="telemetry-value" style="font-size:13px;">${latest && latest.accuracy_m != null ? `±${latest.accuracy_m.toFixed(1)}m` : '—'}</span>
+          </div>
+        </div>
+
+        <div style="font-size:12px; line-height:1.6; border-top:1px solid var(--color-border); padding-top:var(--space-sm);">
+          <div><strong>Last GPS Fix:</strong> <span class="mono">${latest ? escapeHtml(latest.server_timestamp) : 'None recorded'}</span></div>
+          <div><strong>Assigned Driver:</strong> ${driver ? `<span class="mono font-bold">${escapeHtml(driver.name)}</span> (${escapeHtml(driver.phone || 'No phone')})` : '<span class="kpi-sub">Unassigned</span>'}</div>
+          <div><strong>Active Delivery:</strong> ${delivery ? `<code class="mono">${escapeHtml(delivery.delivery_id)}</code> &bull; ${escapeHtml(delivery.pickup)} &rarr; ${escapeHtml(delivery.dropoff)}` : '<span class="kpi-sub">None</span>'}</div>
+        </div>
+
+        ${streetViewBtn}
+
+        ${!latest ? `
+          <div class="kpi-sub mt-md" style="font-size:11px; color:var(--color-muted-foreground);">
+            Tip: To stream real GPS coordinates into this vehicle, go to <strong>Driver Phone GPS Portal</strong>, select the driver assigned to this vehicle, and click <strong>Start GPS Tracking</strong> on your smartphone.
+          </div>
+        ` : ''}
+      `;
+    }
+
+    // Map rendering
+    const map = getOrCreateLeafletMap('vehicle-map', latest ? [latest.latitude, latest.longitude] : [12.9716, 77.5946], 13);
+    if (map && window.L) {
+      const layers = MAPS.layers['vehicle-map'];
+
+      // Clear previous layers
+      if (layers.marker) map.removeLayer(layers.marker);
+      if (layers.circle) map.removeLayer(layers.circle);
+      if (layers.trail) map.removeLayer(layers.trail);
+
+      const fixes = (historyRes && historyRes.fixes) || [];
+      if (fixes.length > 0) {
+        const latlngs = fixes.map((f) => [f.latitude, f.longitude]);
+        layers.trail = window.L.polyline(latlngs, {
+          color: '#00FF41',
+          weight: 3.5,
+          opacity: 0.85,
+          dashArray: '6 4',
+        }).addTo(map);
+
+        if (latest) {
+          const icon = createMapMarkerIcon('vehicle');
+          layers.marker = window.L.marker([latest.latitude, latest.longitude], { icon })
+            .addTo(map)
+            .bindPopup(`<strong>${escapeHtml(vehicle.registration_no || vehicle.vehicle_id)}</strong><br>Speed: ${latest.speed_kmh || 0} km/h<br>Accuracy: ±${latest.accuracy_m || 0}m`);
+
+          layers.circle = window.L.circle([latest.latitude, latest.longitude], {
+            radius: latest.accuracy_m || 20,
+            color: '#00FF41',
+            fillColor: '#00FF41',
+            fillOpacity: 0.12,
+            weight: 1,
+          }).addTo(map);
+
+          try {
+            map.fitBounds(layers.trail.getBounds(), { padding: [35, 35], maxZoom: 16 });
+          } catch {
+            map.setView([latest.latitude, latest.longitude], 14);
+          }
+        }
+      } else if (latest) {
+        const icon = createMapMarkerIcon('vehicle');
+        layers.marker = window.L.marker([latest.latitude, latest.longitude], { icon }).addTo(map);
+        map.setView([latest.latitude, latest.longitude], 14);
+      }
+    }
+
+    // Telemetry graph
+    if (graphStatsEl) {
+      const pts = (telemetryRes && telemetryRes.points_count) || 0;
+      const dist = (telemetryRes && telemetryRes.total_distance_km) || 0;
+      graphStatsEl.textContent = `${pts} pts // ${dist.toFixed(2)} km`;
+    }
+    renderTelemetrySvg('veh-telemetry-svg', telemetryRes);
+  } catch (err) {
+    if (!silent) showGlobalError(err.code || 'VEH_TRACKING_ERROR', err.message);
+  }
+}
+
+/* --- Delivery Transit Tracking --- */
+function renderDeliveryTracking() {
+  const select = document.getElementById('del-tracking-select');
+  if (!select) return;
+
+  const currentVal = select.value || STATE.selectedTrackingDeliveryId || '';
+  select.innerHTML = '<option value="">-- Choose a Delivery Order --</option>' +
+    STATE.deliveries
+      .map((d) => {
+        const isSel = d.delivery_id === currentVal ? 'selected' : '';
+        return `<option value="${escapeHtml(d.delivery_id)}" ${isSel}>${escapeHtml(d.delivery_id)} &bull; ${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)} [${escapeHtml(d.status)}]</option>`;
+      })
+      .join('');
+
+  if (currentVal && STATE.deliveries.some((d) => d.delivery_id === currentVal)) {
+    loadDeliveryTrackingData(currentVal);
+  } else if (STATE.deliveries.length > 0 && !currentVal) {
+    select.value = STATE.deliveries[0].delivery_id;
+    loadDeliveryTrackingData(STATE.deliveries[0].delivery_id);
+  }
+}
+
+async function loadDeliveryTrackingData(deliveryId, silent = false) {
+  if (!deliveryId) return;
+  STATE.selectedTrackingDeliveryId = deliveryId;
+  const infoEl = document.getElementById('del-tracking-info');
+  const graphStatsEl = document.getElementById('del-graph-stats');
+
+  try {
+    const [latestRes, historyRes, telemetryRes] = await Promise.all([
+      apiRequest(`/tracking/deliveries/${encodeURIComponent(deliveryId)}/latest`),
+      apiRequest(`/tracking/history?delivery_id=${encodeURIComponent(deliveryId)}&limit=100`),
+      apiRequest(`/tracking/telemetry-graph?delivery_id=${encodeURIComponent(deliveryId)}`),
+    ]);
+
+    const delivery = latestRes.delivery || STATE.deliveries.find((d) => d.delivery_id === deliveryId) || { delivery_id: deliveryId };
+    const latest = latestRes.latest_location;
+    const vehicle = latestRes.assigned_vehicle;
+    const driver = latestRes.assigned_driver;
+
+    if (infoEl) {
+      const svBtn = latestRes.street_view_url
+        ? `<a href="${escapeHtml(latestRes.street_view_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm streetview-btn" style="width:100%; justify-content:center; margin-top:var(--space-sm);">${icon('navigation', 14)}<span>Street View: Current Driver Position</span></a>`
+        : '';
+      const pickupSvBtn = latestRes.pickup_street_view_url
+        ? `<a href="${escapeHtml(latestRes.pickup_street_view_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-xs mt-xs" style="width:100%; justify-content:center;"><span>View Pickup on Google Maps</span></a>`
+        : '';
+      const dropoffSvBtn = latestRes.dropoff_street_view_url
+        ? `<a href="${escapeHtml(latestRes.dropoff_street_view_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-xs mt-xs" style="width:100%; justify-content:center;"><span>View Dropoff on Google Maps</span></a>`
+        : '';
+
+      infoEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-md);">
+          <div>
+            <span class="mono font-bold" style="font-size:16px;">${escapeHtml(delivery.delivery_id)}</span>
+            <div class="kpi-sub">Priority: <strong>${escapeHtml(delivery.priority || 'normal')}</strong> &bull; Cap: ${escapeHtml(delivery.required_capacity || 0)}</div>
+          </div>
+          ${statusBadgeHtml(delivery.status)}
+        </div>
+
+        <div style="background:var(--color-secondary); padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm); margin-bottom:var(--space-md); font-size:12px;">
+          <div><strong style="color:var(--color-primary);">FROM:</strong> ${escapeHtml(delivery.pickup)}</div>
+          <div><strong style="color:var(--color-accent);">TO:</strong> ${escapeHtml(delivery.dropoff)}</div>
+          <div class="kpi-sub mt-xs">ETA: ${escapeHtml(delivery.scheduled_time)}</div>
+        </div>
+
+        <div style="font-size:12px; line-height:1.6; border-top:1px solid var(--color-border); padding-top:var(--space-sm);">
+          <div><strong>Vehicle:</strong> ${vehicle ? `<code class="mono">${escapeHtml(vehicle.registration_no || vehicle.vehicle_id)}</code>` : '<span class="kpi-sub">Unassigned</span>'}</div>
+          <div><strong>Driver:</strong> ${driver ? `<span class="mono font-bold">${escapeHtml(driver.name)}</span> (${escapeHtml(driver.phone || 'No phone')})` : '<span class="kpi-sub">Unassigned</span>'}</div>
+          <div><strong>Driver GPS Fix:</strong> ${latest ? `<span class="mono">${latest.latitude.toFixed(5)}, ${latest.longitude.toFixed(5)}</span> (&plusmn;${latest.accuracy_m ? latest.accuracy_m.toFixed(1) : 0}m)` : '<span class="kpi-sub">No live GPS fixes</span>'}</div>
+        </div>
+
+        ${svBtn}
+        ${pickupSvBtn}
+        ${dropoffSvBtn}
+      `;
+    }
+
+    // Map rendering
+    const map = getOrCreateLeafletMap('delivery-map', latest ? [latest.latitude, latest.longitude] : [12.9716, 77.5946], 13);
+    if (map && window.L) {
+      const layers = MAPS.layers['delivery-map'];
+      if (layers.marker) map.removeLayer(layers.marker);
+      if (layers.circle) map.removeLayer(layers.circle);
+      if (layers.trail) map.removeLayer(layers.trail);
+
+      const fixes = (historyRes && historyRes.fixes) || [];
+      if (fixes.length > 0) {
+        const latlngs = fixes.map((f) => [f.latitude, f.longitude]);
+        layers.trail = window.L.polyline(latlngs, {
+          color: '#00E5FF',
+          weight: 3.5,
+          opacity: 0.85,
+        }).addTo(map);
+
+        if (latest) {
+          const icon = createMapMarkerIcon('delivery');
+          layers.marker = window.L.marker([latest.latitude, latest.longitude], { icon })
+            .addTo(map)
+            .bindPopup(`<strong>Delivery: ${escapeHtml(delivery.delivery_id)}</strong><br>Driver: ${driver ? escapeHtml(driver.name) : 'Assigned'}<br>Speed: ${latest.speed_kmh || 0} km/h`);
+
+          layers.circle = window.L.circle([latest.latitude, latest.longitude], {
+            radius: latest.accuracy_m || 20,
+            color: '#00E5FF',
+            fillColor: '#00E5FF',
+            fillOpacity: 0.12,
+            weight: 1,
+          }).addTo(map);
+
+          try {
+            map.fitBounds(layers.trail.getBounds(), { padding: [35, 35], maxZoom: 16 });
+          } catch {
+            map.setView([latest.latitude, latest.longitude], 14);
+          }
+        }
+      } else if (latest) {
+        const icon = createMapMarkerIcon('delivery');
+        layers.marker = window.L.marker([latest.latitude, latest.longitude], { icon }).addTo(map);
+        map.setView([latest.latitude, latest.longitude], 14);
+      }
+    }
+
+    // Telemetry graph
+    if (graphStatsEl) {
+      const pts = (telemetryRes && telemetryRes.points_count) || 0;
+      const dist = (telemetryRes && telemetryRes.total_distance_km) || 0;
+      graphStatsEl.textContent = `${pts} pts // ${dist.toFixed(2)} km`;
+    }
+    renderTelemetrySvg('del-telemetry-svg', telemetryRes);
+  } catch (err) {
+    if (!silent) showGlobalError(err.code || 'DEL_TRACKING_ERROR', err.message);
+  }
+}
+
+/* --- Driver Smartphone GPS Portal --- */
+function renderDriverGpsPortal() {
+  const select = document.getElementById('driver-gps-select');
+  if (!select) return;
+
+  const currentVal = select.value || TRACKING_STATE.activeDriverId || '';
+  select.innerHTML = '<option value="">-- Select Driver to Track --</option>' +
+    STATE.drivers
+      .map((d) => {
+        const isSel = d.driver_id === currentVal ? 'selected' : '';
+        return `<option value="${escapeHtml(d.driver_id)}" ${isSel}>${escapeHtml(d.name)} &bull; ${escapeHtml(d.phone)} [${escapeHtml(d.availability_status)}]</option>`;
+      })
+      .join('');
+
+  updateDriverGpsCard(select.value);
+}
+
+function updateDriverGpsCard(driverId) {
+  const nameEl = document.getElementById('driver-card-name');
+  const phoneEl = document.getElementById('driver-card-phone');
+  if (!driverId) {
+    if (nameEl) nameEl.textContent = 'No driver selected';
+    if (phoneEl) phoneEl.textContent = 'Phone: —';
+    return;
+  }
+  const driver = STATE.drivers.find((d) => d.driver_id === driverId);
+  if (driver) {
+    if (nameEl) nameEl.textContent = `${driver.name} (${driver.driver_id})`;
+    if (phoneEl) phoneEl.textContent = `Phone: ${driver.phone}`;
+  }
+}
+
+function handleIncomingGpsFix(pos) {
+  const coords = pos.coords;
+  const lat = coords.latitude;
+  const lng = coords.longitude;
+  const accuracy = coords.accuracy;
+  const speed = coords.speed != null ? coords.speed * 3.6 : null;
+  const heading = coords.heading != null ? coords.heading : null;
+  const deviceTimestamp = new Date(pos.timestamp).toISOString();
+
+  TRACKING_STATE.fixCount += 1;
+  TRACKING_STATE.lastFix = { lat, lng, accuracy, speed, heading, deviceTimestamp };
+
+  // Update DOM displays
+  const latEl = document.getElementById('disp-lat');
+  const lngEl = document.getElementById('disp-lng');
+  const accEl = document.getElementById('disp-acc');
+  const speedEl = document.getElementById('disp-speed');
+  const countEl = document.getElementById('disp-fixes-count');
+  const pingEl = document.getElementById('disp-last-ping');
+  const svWrap = document.getElementById('disp-streetview-wrap');
+
+  if (latEl) latEl.textContent = lat.toFixed(6);
+  if (lngEl) lngEl.textContent = lng.toFixed(6);
+  if (accEl) accEl.textContent = `\u00B1${accuracy.toFixed(1)}m`;
+  if (speedEl) speedEl.textContent = speed != null ? speed.toFixed(1) : '0.0';
+  if (countEl) countEl.textContent = TRACKING_STATE.fixCount;
+  if (pingEl) pingEl.textContent = new Date().toLocaleTimeString([], { hour12: false });
+
+  if (svWrap) {
+    const svUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat.toFixed(6)},${lng.toFixed(6)}`;
+    svWrap.innerHTML = `
+      <a href="${svUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-xs streetview-btn">
+        ${icon('navigation', 12)}<span>Street View</span>
+      </a>
+    `;
+  }
+
+  // Stream coordinate to backend
+  if (TRACKING_STATE.activeSessionId && TRACKING_STATE.activeDriverId) {
+    apiRequest('/tracking/location', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: TRACKING_STATE.activeSessionId,
+        driver_id: TRACKING_STATE.activeDriverId,
+        latitude: lat,
+        longitude: lng,
+        accuracy,
+        speed,
+        heading,
+        device_timestamp: deviceTimestamp,
+      }),
+    }).catch((err) => {
+      console.warn('GPS location ingestion warning:', err);
+    });
+  }
+
+  // Update driver mini-map
+  const map = getOrCreateLeafletMap('driver-mini-map', [lat, lng], 16);
+  if (map && window.L) {
+    const layers = MAPS.layers['driver-mini-map'];
+    if (layers.marker) map.removeLayer(layers.marker);
+    if (layers.circle) map.removeLayer(layers.circle);
+
+    const icon = createMapMarkerIcon('driver');
+    layers.marker = window.L.marker([lat, lng], { icon }).addTo(map);
+    layers.circle = window.L.circle([lat, lng], {
+      radius: accuracy,
+      color: '#FFB000',
+      fillColor: '#FFB000',
+      fillOpacity: 0.15,
+      weight: 1,
+    }).addTo(map);
+
+    map.setView([lat, lng]);
+  }
+}
+
+function handleGpsError(err) {
+  const badge = document.getElementById('gps-status-badge');
+  let msg = 'Failed to acquire device GPS position.';
+  if (err.code === 1) {
+    msg = 'Location permission denied. Please allow location access in your browser address bar settings.';
+    if (badge) {
+      badge.textContent = 'PERMISSION DENIED';
+      badge.className = 'status-badge status-conflict';
+    }
+  } else if (err.code === 2) {
+    msg = 'GPS position unavailable. Ensure device location / GPS is turned ON in your phone settings.';
+    if (badge) {
+      badge.textContent = 'GPS UNAVAILABLE';
+      badge.className = 'status-badge status-conflict';
+    }
+  } else if (err.code === 3) {
+    msg = 'GPS request timed out. Retrying satellite acquisition...';
+    if (badge) {
+      badge.textContent = 'GPS TIMEOUT';
+      badge.className = 'status-badge status-stale';
+    }
+  }
+  showToast(msg, true, 'GPS_ERROR');
+}
+
+async function startDriverGpsTracking() {
+  const driverSelect = document.getElementById('driver-gps-select');
+  const driverId = driverSelect ? driverSelect.value : '';
+  if (!driverId) {
+    showToast('Please select a driver to start GPS tracking.', true, 'NO_DRIVER');
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    showToast('HTML5 Geolocation is not supported by your browser or environment.', true, 'NO_GEOLOCATION');
+    return;
+  }
+
+  const deviceInput = document.getElementById('driver-device-info');
+  const deviceInfo = (deviceInput && deviceInput.value.trim()) || navigator.userAgent.slice(0, 80);
+
+  try {
+    const session = await apiRequest('/tracking/sessions/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        driver_id: driverId,
+        device_info: deviceInfo,
+      }),
+    });
+
+    TRACKING_STATE.activeSessionId = session.session_id;
+    TRACKING_STATE.activeDriverId = driverId;
+    TRACKING_STATE.fixCount = 0;
+
+    const badge = document.getElementById('gps-status-badge');
+    const startBtn = document.getElementById('btn-start-gps');
+    const stopBtn = document.getElementById('btn-stop-gps');
+    if (badge) {
+      badge.textContent = 'STREAMING LIVE';
+      badge.className = 'status-badge status-live';
+    }
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = false;
+
+    // Start watching physical device location
+    TRACKING_STATE.watchId = navigator.geolocation.watchPosition(
+      handleIncomingGpsFix,
+      handleGpsError,
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      }
+    );
+
+    showToast(`GPS Tracking started for session #${session.session_id}`);
+  } catch (err) {
+    showGlobalError(err.code || 'GPS_START_ERROR', err.message);
+  }
+}
+
+async function stopDriverGpsTracking() {
+  if (TRACKING_STATE.watchId != null) {
+    navigator.geolocation.clearWatch(TRACKING_STATE.watchId);
+    TRACKING_STATE.watchId = null;
+  }
+
+  if (TRACKING_STATE.activeSessionId) {
+    try {
+      await apiRequest('/tracking/sessions/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: TRACKING_STATE.activeSessionId,
+        }),
+      });
+    } catch (err) {
+      console.warn('Error closing tracking session:', err);
+    }
+    TRACKING_STATE.activeSessionId = null;
+  }
+
+  const badge = document.getElementById('gps-status-badge');
+  const startBtn = document.getElementById('btn-start-gps');
+  const stopBtn = document.getElementById('btn-stop-gps');
+  if (badge) {
+    badge.textContent = 'STOPPED';
+    badge.className = 'status-badge status-inactive';
+  }
+  if (startBtn) startBtn.disabled = false;
+  if (stopBtn) stopBtn.disabled = true;
+
+  showToast('GPS tracking stopped.');
+}
+
+function openEditDriverPhoneModal(driverId) {
+  const driver = STATE.drivers.find((d) => d.driver_id === driverId);
+  if (!driver) return;
+  document.getElementById('phone-driver-id').value = driver.driver_id;
+  document.getElementById('phone-driver-name').textContent = `${driver.name} (${driver.driver_id})`;
+  document.getElementById('phone-input').value = driver.phone || '';
+  openModal('modal-driver-phone');
+}
+
 function initTheme() {
   const saved = localStorage.getItem('fleetwise_theme') || 'dark';
   document.documentElement.setAttribute('data-theme', saved);
@@ -1239,8 +1989,19 @@ function setupSSE() {
       if (dot) dot.classList.remove('paused');
       if (txt) txt.textContent = 'LIVE SSE';
     };
-    sseSource.onmessage = () => {
+    sseSource.onmessage = (event) => {
       refreshAllData(true);
+      try {
+        const data = JSON.parse(event.data);
+        if (data && data.event === 'gps_location_update') {
+          if (STATE.activeView === 'vehicle-tracking' && STATE.selectedTrackingVehicleId === data.vehicle_id) {
+            loadVehicleTrackingData(data.vehicle_id, true);
+          }
+          if (STATE.activeView === 'delivery-tracking' && STATE.selectedTrackingDeliveryId === data.delivery_id) {
+            loadDeliveryTrackingData(data.delivery_id, true);
+          }
+        }
+      } catch {}
     };
     sseSource.onerror = () => {
       const txt = document.getElementById('telemetry-status');
@@ -1722,6 +2483,68 @@ function setupEventListeners() {
     }
   });
 
+  // Vehicle Live Tracking listeners
+  document.getElementById('veh-tracking-select')?.addEventListener('change', (e) => {
+    loadVehicleTrackingData(e.target.value);
+  });
+  document.getElementById('btn-refresh-veh-tracking')?.addEventListener('click', () => {
+    const sel = document.getElementById('veh-tracking-select');
+    if (sel && sel.value) loadVehicleTrackingData(sel.value);
+    else showToast('Please select a vehicle to refresh.');
+  });
+
+  // Delivery Transit Tracking listeners
+  document.getElementById('del-tracking-select')?.addEventListener('change', (e) => {
+    loadDeliveryTrackingData(e.target.value);
+  });
+  document.getElementById('btn-refresh-del-tracking')?.addEventListener('click', () => {
+    const sel = document.getElementById('del-tracking-select');
+    if (sel && sel.value) loadDeliveryTrackingData(sel.value);
+    else showToast('Please select a delivery to refresh.');
+  });
+
+  // Driver Phone GPS Portal listeners
+  document.getElementById('driver-gps-select')?.addEventListener('change', (e) => {
+    updateDriverGpsCard(e.target.value);
+  });
+  document.getElementById('btn-edit-driver-phone')?.addEventListener('click', () => {
+    const sel = document.getElementById('driver-gps-select');
+    if (sel && sel.value) openEditDriverPhoneModal(sel.value);
+    else showToast('Please select a driver first.');
+  });
+  document.getElementById('btn-start-gps')?.addEventListener('click', startDriverGpsTracking);
+  document.getElementById('btn-stop-gps')?.addEventListener('click', stopDriverGpsTracking);
+
+  // Driver phone edit form modal
+  document.getElementById('form-driver-phone')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const driverId = document.getElementById('phone-driver-id')?.value;
+    const phone = document.getElementById('phone-input')?.value.trim();
+    if (!driverId || !phone) return;
+    try {
+      const updated = await apiRequest(`/drivers/${encodeURIComponent(driverId)}/phone`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      showToast(`Phone number updated for ${updated.name}: ${updated.phone}`);
+      closeModal('modal-driver-phone');
+      await refreshAllData(true);
+      updateDriverGpsCard(document.getElementById('driver-gps-select')?.value);
+    } catch (err) {
+      showGlobalError(err.code || 'PHONE_UPDATE_ERROR', err.message);
+    }
+  });
+
+  // Delegated click for editing driver phone anywhere in tables
+  document.addEventListener('click', (e) => {
+    const editPhoneBtn = e.target.closest('[data-edit-phone]');
+    if (editPhoneBtn) {
+      const driverId = editPhoneBtn.getAttribute('data-edit-phone');
+      if (driverId) openEditDriverPhoneModal(driverId);
+    }
+  });
+
   // Theme & Shortcuts
   document.getElementById('btn-theme-toggle')?.addEventListener('click', toggleTheme);
   document.getElementById('btn-shortcuts')?.addEventListener('click', () => openModal('modal-shortcuts'));
@@ -1737,7 +2560,7 @@ function setupEventListeners() {
       e.preventDefault();
       openCommandPalette();
     } else if (e.key === 'Escape') {
-      ['modal-cmd', 'modal-vehicle', 'modal-driver', 'modal-delivery', 'modal-blocked-queue', 'modal-shortcuts'].forEach(closeModal);
+      ['modal-cmd', 'modal-vehicle', 'modal-driver', 'modal-delivery', 'modal-blocked-queue', 'modal-shortcuts', 'modal-driver-phone'].forEach(closeModal);
     } else if (!isTyping && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (e.key === '?') {
         e.preventDefault();
@@ -1747,6 +2570,9 @@ function setupEventListeners() {
       else if (e.key === '3') switchView('dispatch');
       else if (e.key === '4') switchView('fleet');
       else if (e.key === '5') switchView('drivers');
+      else if (e.key === '6') switchView('vehicle-tracking');
+      else if (e.key === '7') switchView('delivery-tracking');
+      else if (e.key === '8') switchView('driver-gps');
       else if (e.key.toLowerCase() === 'i') switchView('import');
       else if (e.key.toLowerCase() === 'l') switchView('racelab');
       else if (e.key.toLowerCase() === 'y') switchView('analytics');

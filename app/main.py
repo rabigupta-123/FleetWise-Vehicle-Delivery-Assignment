@@ -52,7 +52,11 @@ from app.schemas import (
     DeliveryCreate,
     DeliveryStatusPatch,
     DriverCreate,
+    DriverPhonePatch,
     DriverStatusPatch,
+    GPSLocationCreate,
+    TrackingSessionStart,
+    TrackingSessionStop,
     VehicleCreate,
     VehicleStatusPatch,
 )
@@ -106,7 +110,7 @@ async def security_headers_middleware(request: Request, call_next):
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
-        "img-src 'self' data:;"
+        "img-src 'self' data: https://*.tile.openstreetmap.org https://tile.openstreetmap.org;"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -478,6 +482,27 @@ def patch_driver_status(driver_id: str, body: DriverStatusPatch, request: Reques
         write_audit(conn, actor=actor, action="update_status", entity="driver", entity_id=driver_id, before=current_drv, after=after_drv)
 
     broadcast_event("driver_status_changed", after_drv)
+    return after_drv
+
+
+@app.patch("/drivers/{driver_id}/phone")
+def patch_driver_phone(driver_id: str, body: DriverPhonePatch, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    clean_phone = body.phone.strip()
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Driver '{driver_id}' not found.")
+        current_drv = dict(row)
+
+        conn.execute("UPDATE drivers SET phone = ? WHERE driver_id = ?", (clean_phone, driver_id))
+        after_drv = {**current_drv, "phone": clean_phone}
+        write_audit(conn, actor=actor, action="update_phone", entity="driver", entity_id=driver_id, before=current_drv, after=after_drv)
+
+    broadcast_event("driver_phone_updated", after_drv)
     return after_drv
 
 
@@ -1363,3 +1388,484 @@ def get_routes():
             """
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# -------------------------------------------------------------------------
+# REAL PHONE GPS TRACKING, VEHICLE & DELIVERY TELEMETRY & STREET VIEW
+# -------------------------------------------------------------------------
+def make_street_view_url(lat: Optional[float], lng: Optional[float]) -> Optional[str]:
+    if lat is None or lng is None:
+        return None
+    return f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat:.6f},{lng:.6f}"
+
+
+@app.post("/tracking/sessions/start", status_code=201)
+def start_tracking_session(body: TrackingSessionStart, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        drv_row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (body.driver_id,)).fetchone()
+        if not drv_row:
+            raise AppError(404, "NOT_FOUND", f"Driver '{body.driver_id}' not found.")
+
+        # Check if driver is actively assigned to any delivery/vehicle
+        asg_row = conn.execute(
+            """
+            SELECT assignment_id, vehicle_id, delivery_id
+            FROM assignments
+            WHERE driver_id = ? AND released_at IS NULL
+            """,
+            (body.driver_id,),
+        ).fetchone()
+
+        vehicle_id = asg_row["vehicle_id"] if asg_row else None
+        delivery_id = asg_row["delivery_id"] if asg_row else None
+
+        now_str = utc_now_iso()
+        # Mark prior active sessions for this driver as stopped
+        conn.execute(
+            "UPDATE tracking_sessions SET status = 'stopped', stopped_at = ? WHERE driver_id = ? AND status = 'active'",
+            (now_str, body.driver_id),
+        )
+
+        session_id = f"TRK-{uuid.uuid4().hex[:10].upper()}"
+        dev_info = body.device_info or "Mobile Browser Geolocation"
+        conn.execute(
+            """
+            INSERT INTO tracking_sessions (session_id, driver_id, vehicle_id, delivery_id, device_info, started_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'active')
+            """,
+            (session_id, body.driver_id, vehicle_id, delivery_id, dev_info, now_str),
+        )
+
+        session_data = {
+            "session_id": session_id,
+            "driver_id": body.driver_id,
+            "driver_name": drv_row["name"],
+            "driver_phone": drv_row["phone"],
+            "vehicle_id": vehicle_id,
+            "delivery_id": delivery_id,
+            "device_info": dev_info,
+            "started_at": now_str,
+            "status": "active",
+        }
+        write_audit(conn, actor=actor, action="start_tracking", entity="tracking_session", entity_id=session_id, after=session_data)
+
+    broadcast_event("tracking_session_started", session_data)
+    return session_data
+
+
+@app.post("/tracking/sessions/stop")
+def stop_tracking_session(body: TrackingSessionStop, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM tracking_sessions WHERE session_id = ?", (body.session_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Tracking session '{body.session_id}' not found.")
+
+        now_str = utc_now_iso()
+        conn.execute(
+            "UPDATE tracking_sessions SET status = 'stopped', stopped_at = ? WHERE session_id = ?",
+            (now_str, body.session_id),
+        )
+        updated_data = {**dict(row), "status": "stopped", "stopped_at": now_str}
+        write_audit(conn, actor=actor, action="stop_tracking", entity="tracking_session", entity_id=body.session_id, after=updated_data)
+
+    broadcast_event("tracking_session_stopped", updated_data)
+    return updated_data
+
+
+@app.post("/tracking/location", status_code=201)
+def record_gps_location(body: GPSLocationCreate, request: Request):
+    user = get_current_user(request)
+    actor = user["username"] if user else "device"
+
+    with immediate_transaction() as conn:
+        sess_row = conn.execute("SELECT * FROM tracking_sessions WHERE session_id = ?", (body.session_id,)).fetchone()
+        if not sess_row:
+            raise AppError(404, "NOT_FOUND", f"Tracking session '{body.session_id}' not found.")
+        session = dict(sess_row)
+
+        if session["status"] != "active":
+            raise AppError(400, "SESSION_INACTIVE", f"Tracking session '{body.session_id}' is currently '{session['status']}'.")
+
+        driver_id = session["driver_id"]
+
+        # Re-verify active vehicle & delivery assignment
+        asg_row = conn.execute(
+            "SELECT vehicle_id, delivery_id FROM assignments WHERE driver_id = ? AND released_at IS NULL",
+            (driver_id,),
+        ).fetchone()
+
+        vehicle_id = asg_row["vehicle_id"] if asg_row else session.get("vehicle_id")
+        delivery_id = asg_row["delivery_id"] if asg_row else session.get("delivery_id")
+
+        now_str = utc_now_iso()
+        loc_id = f"LOC-{uuid.uuid4().hex[:10].upper()}"
+
+        conn.execute(
+            """
+            INSERT INTO gps_locations (
+                location_id, session_id, driver_id, vehicle_id, delivery_id,
+                latitude, longitude, accuracy, speed, heading,
+                device_timestamp, server_timestamp, is_valid
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (
+                loc_id,
+                body.session_id,
+                driver_id,
+                vehicle_id,
+                delivery_id,
+                body.latitude,
+                body.longitude,
+                body.accuracy,
+                body.speed,
+                body.heading,
+                body.device_timestamp,
+                now_str,
+            ),
+        )
+
+        record = {
+            "location_id": loc_id,
+            "session_id": body.session_id,
+            "driver_id": driver_id,
+            "vehicle_id": vehicle_id,
+            "delivery_id": delivery_id,
+            "latitude": body.latitude,
+            "longitude": body.longitude,
+            "accuracy": body.accuracy,
+            "speed": body.speed,
+            "heading": body.heading,
+            "device_timestamp": body.device_timestamp,
+            "server_timestamp": now_str,
+            "is_valid": True,
+            "street_view_url": make_street_view_url(body.latitude, body.longitude),
+        }
+
+    broadcast_event("gps_location_update", record)
+    return record
+
+
+@app.get("/tracking/drivers/{driver_id}/latest")
+def get_driver_latest_location(driver_id: str):
+    with read_conn() as conn:
+        drv = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone()
+        if not drv:
+            raise AppError(404, "NOT_FOUND", f"Driver '{driver_id}' not found.")
+
+        row = conn.execute(
+            """
+            SELECT * FROM gps_locations
+            WHERE driver_id = ?
+            ORDER BY server_timestamp DESC, rowid DESC
+            LIMIT 1
+            """,
+            (driver_id,),
+        ).fetchone()
+
+        if not row:
+            return {
+                "driver_id": driver_id,
+                "driver_name": drv["name"],
+                "driver_phone": drv["phone"],
+                "has_gps": False,
+                "status": "no_signal",
+                "message": "No GPS telemetry has been received for this driver yet.",
+            }
+
+        rec = dict(row)
+        try:
+            fix_time = datetime.fromisoformat(rec["server_timestamp"].replace("Z", "+00:00"))
+            age_sec = (datetime.now(timezone.utc) - fix_time).total_seconds()
+            is_stale = age_sec > 90
+        except Exception:
+            is_stale = False
+            age_sec = 0
+
+        rec["has_gps"] = True
+        rec["is_stale"] = is_stale
+        rec["age_seconds"] = round(age_sec, 1)
+        rec["tracking_status"] = "stale" if is_stale else "live"
+        rec["street_view_url"] = make_street_view_url(rec["latitude"], rec["longitude"])
+        rec["driver_name"] = drv["name"]
+        rec["driver_phone"] = drv["phone"]
+        return rec
+
+
+@app.get("/tracking/vehicles/{vehicle_id}/latest")
+def get_vehicle_latest_location(vehicle_id: str):
+    with read_conn() as conn:
+        veh = conn.execute("SELECT * FROM vehicles WHERE vehicle_id = ?", (vehicle_id,)).fetchone()
+        if not veh:
+            raise AppError(404, "NOT_FOUND", f"Vehicle '{vehicle_id}' not found.")
+
+        asg = conn.execute(
+            """
+            SELECT a.*, dr.name as driver_name, dr.name, dr.phone as driver_phone, dr.phone
+            FROM assignments a
+            JOIN drivers dr ON dr.driver_id = a.driver_id
+            WHERE a.vehicle_id = ? AND a.released_at IS NULL
+            """,
+            (vehicle_id,),
+        ).fetchone()
+
+        row = conn.execute(
+            """
+            SELECT * FROM gps_locations
+            WHERE vehicle_id = ?
+            ORDER BY server_timestamp DESC, rowid DESC
+            LIMIT 1
+            """,
+            (vehicle_id,),
+        ).fetchone()
+
+        if not row and asg:
+            row = conn.execute(
+                """
+                SELECT * FROM gps_locations
+                WHERE driver_id = ?
+                ORDER BY server_timestamp DESC, rowid DESC
+                LIMIT 1
+                """,
+                (asg["driver_id"],),
+            ).fetchone()
+
+        if not row:
+            return {
+                "vehicle_id": vehicle_id,
+                "registration_no": veh["registration_no"],
+                "vehicle_type": veh["type"],
+                "capacity": veh["capacity"],
+                "has_gps": False,
+                "status": "offline",
+                "assigned_driver": dict(asg) if asg else None,
+                "message": "No GPS telemetry has been recorded for this vehicle.",
+            }
+
+        rec = dict(row)
+        try:
+            fix_time = datetime.fromisoformat(rec["server_timestamp"].replace("Z", "+00:00"))
+            age_sec = (datetime.now(timezone.utc) - fix_time).total_seconds()
+            is_stale = age_sec > 90
+        except Exception:
+            is_stale = False
+            age_sec = 0
+
+        rec["has_gps"] = True
+        rec["is_stale"] = is_stale
+        rec["age_seconds"] = round(age_sec, 1)
+        rec["tracking_status"] = "stale" if is_stale else "live"
+        rec["registration_no"] = veh["registration_no"]
+        rec["vehicle_type"] = veh["type"]
+        rec["capacity"] = veh["capacity"]
+        rec["assigned_driver"] = dict(asg) if asg else None
+        rec["street_view_url"] = make_street_view_url(rec["latitude"], rec["longitude"])
+        return rec
+
+
+@app.get("/tracking/deliveries/{delivery_id}/latest")
+def get_delivery_latest_location(delivery_id: str):
+    with read_conn() as conn:
+        deliv = conn.execute("SELECT * FROM deliveries WHERE delivery_id = ?", (delivery_id,)).fetchone()
+        if not deliv:
+            raise AppError(404, "NOT_FOUND", f"Delivery '{delivery_id}' does not exist.")
+
+        d_dict = dict(deliv)
+
+        asg = conn.execute(
+            """
+            SELECT a.*, v.registration_no, v.type as vehicle_type, dr.name as driver_name, dr.name, dr.phone as driver_phone, dr.phone
+            FROM assignments a
+            JOIN vehicles v ON v.vehicle_id = a.vehicle_id
+            JOIN drivers dr ON dr.driver_id = a.driver_id
+            WHERE a.delivery_id = ? AND a.released_at IS NULL
+            """,
+            (delivery_id,),
+        ).fetchone()
+
+        row = conn.execute(
+            """
+            SELECT * FROM gps_locations
+            WHERE delivery_id = ?
+            ORDER BY server_timestamp DESC, rowid DESC
+            LIMIT 1
+            """,
+            (delivery_id,),
+        ).fetchone()
+
+        if not row and asg:
+            row = conn.execute(
+                """
+                SELECT * FROM gps_locations
+                WHERE driver_id = ?
+                ORDER BY server_timestamp DESC, rowid DESC
+                LIMIT 1
+                """,
+                (asg["driver_id"],),
+            ).fetchone()
+
+        resp = {
+            "delivery": d_dict,
+            "assignment": dict(asg) if asg else None,
+            "pickup_street_view": make_street_view_url(d_dict.get("pickup_lat"), d_dict.get("pickup_lng")),
+            "dropoff_street_view": make_street_view_url(d_dict.get("drop_lat"), d_dict.get("drop_lng")),
+        }
+
+        if not row:
+            resp["has_gps"] = False
+            resp["tracking_status"] = "offline"
+            resp["message"] = "No live GPS coordinates reported for this delivery yet."
+            return resp
+
+        rec = dict(row)
+        try:
+            fix_time = datetime.fromisoformat(rec["server_timestamp"].replace("Z", "+00:00"))
+            age_sec = (datetime.now(timezone.utc) - fix_time).total_seconds()
+            is_stale = age_sec > 90
+        except Exception:
+            is_stale = False
+            age_sec = 0
+
+        rec["has_gps"] = True
+        rec["is_stale"] = is_stale
+        rec["age_seconds"] = round(age_sec, 1)
+        rec["tracking_status"] = "stale" if is_stale else "live"
+        rec["current_street_view"] = make_street_view_url(rec["latitude"], rec["longitude"])
+        resp["latest_location"] = rec
+        resp["has_gps"] = True
+        resp["tracking_status"] = rec["tracking_status"]
+        return resp
+
+
+@app.get("/tracking/history")
+def get_tracking_history(
+    session_id: Optional[str] = Query(None),
+    driver_id: Optional[str] = Query(None),
+    vehicle_id: Optional[str] = Query(None),
+    delivery_id: Optional[str] = Query(None),
+    since: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    with read_conn() as conn:
+        conditions = ["is_valid = 1"]
+        params = []
+        if session_id:
+            conditions.append("session_id = ?")
+            params.append(session_id)
+        if driver_id:
+            conditions.append("driver_id = ?")
+            params.append(driver_id)
+        if vehicle_id:
+            conditions.append("vehicle_id = ?")
+            params.append(vehicle_id)
+        if delivery_id:
+            conditions.append("delivery_id = ?")
+            params.append(delivery_id)
+        if since:
+            conditions.append("server_timestamp >= ?")
+            params.append(since)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT location_id, session_id, driver_id, vehicle_id, delivery_id,
+                   latitude, longitude, accuracy, speed, heading,
+                   device_timestamp, server_timestamp
+            FROM gps_locations
+            WHERE {where_clause}
+            ORDER BY server_timestamp ASC
+            LIMIT ?
+        """
+        params.append(limit)
+        rows = conn.execute(query, tuple(params)).fetchall()
+        trail = [dict(r) for r in rows]
+        for pt in trail:
+            pt["street_view_url"] = make_street_view_url(pt["latitude"], pt["longitude"])
+        return {
+            "count": len(trail),
+            "trail": trail,
+        }
+
+
+@app.get("/tracking/telemetry-graph")
+def get_telemetry_graph(
+    driver_id: Optional[str] = Query(None),
+    vehicle_id: Optional[str] = Query(None),
+    delivery_id: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=5, le=500),
+):
+    import math
+
+    with read_conn() as conn:
+        conditions = ["is_valid = 1"]
+        params = []
+        if session_id:
+            conditions.append("session_id = ?")
+            params.append(session_id)
+        elif delivery_id:
+            conditions.append("delivery_id = ?")
+            params.append(delivery_id)
+        elif vehicle_id:
+            conditions.append("vehicle_id = ?")
+            params.append(vehicle_id)
+        elif driver_id:
+            conditions.append("driver_id = ?")
+            params.append(driver_id)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT location_id, latitude, longitude, accuracy, speed, heading, server_timestamp
+            FROM gps_locations
+            WHERE {where_clause}
+            ORDER BY server_timestamp ASC
+            LIMIT ?
+        """
+        params.append(limit)
+        rows = conn.execute(query, tuple(params)).fetchall()
+
+    def haversine(lat1, lon1, lat2, lon2):
+        R = 6371.0
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return R * c
+
+    points = []
+    total_dist_km = 0.0
+    prev_pt = None
+
+    for r in rows:
+        d_km = 0.0
+        if prev_pt:
+            d_km = haversine(prev_pt["latitude"], prev_pt["longitude"], r["latitude"], r["longitude"])
+            total_dist_km += d_km
+        prev_pt = r
+
+        raw_speed = r["speed"]
+        speed_kmh = round(raw_speed * 3.6, 1) if raw_speed is not None else 0.0
+
+        points.append({
+            "timestamp": r["server_timestamp"],
+            "speed_kmh": speed_kmh,
+            "accuracy_m": round(r["accuracy"], 1),
+            "distance_km": round(total_dist_km, 3),
+            "latitude": r["latitude"],
+            "longitude": r["longitude"],
+        })
+
+    return {
+        "data_points": points,
+        "total_distance_km": round(total_dist_km, 3),
+        "point_count": len(points),
+        "max_speed_kmh": max([p["speed_kmh"] for p in points], default=0.0),
+        "avg_accuracy_m": round(sum([p["accuracy_m"] for p in points]) / len(points), 1) if points else 0.0,
+    }

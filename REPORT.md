@@ -84,6 +84,30 @@ The database uses SQLite 3 with `PRAGMA foreign_keys = ON` and `PRAGMA journal_m
    - `entity TEXT NOT NULL`, `entity_id TEXT NOT NULL`
    - `before_json TEXT NULL`, `after_json TEXT NULL`
 
+6. **`tracking_sessions`**:
+   - `session_id INTEGER PRIMARY KEY AUTOINCREMENT`
+   - `driver_id TEXT NOT NULL REFERENCES drivers(driver_id)`
+   - `vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id)`
+   - `delivery_id TEXT NULL REFERENCES deliveries(delivery_id)`
+   - `device_info TEXT NULL`
+   - `started_at TEXT NOT NULL`, `stopped_at TEXT NULL`
+   - `status TEXT NOT NULL CHECK(status IN ('active', 'stopped', 'expired'))`
+
+7. **`gps_locations`**:
+   - `location_id INTEGER PRIMARY KEY AUTOINCREMENT`
+   - `session_id INTEGER NOT NULL REFERENCES tracking_sessions(session_id)`
+   - `driver_id TEXT NOT NULL REFERENCES drivers(driver_id)`
+   - `vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id)`
+   - `delivery_id TEXT NULL REFERENCES deliveries(delivery_id)`
+   - `latitude REAL NOT NULL CHECK(latitude BETWEEN -90.0 AND 90.0)`
+   - `longitude REAL NOT NULL CHECK(longitude BETWEEN -180.0 AND 180.0)`
+   - `accuracy REAL NOT NULL CHECK(accuracy >= 0.0)`
+   - `speed REAL NULL CHECK(speed IS NULL OR speed >= 0.0)`
+   - `heading REAL NULL CHECK(heading IS NULL OR (heading >= 0.0 AND heading <= 360.0))`
+   - `device_timestamp TEXT NOT NULL`, `server_timestamp TEXT NOT NULL`
+   - `is_valid INTEGER NOT NULL DEFAULT 1`
+   - *Indexes:* `idx_gps_driver_ts`, `idx_gps_vehicle_ts`, `idx_gps_delivery_ts`, `idx_gps_session_ts`
+
 ### Database Engine Partial Unique Indexes
 To prevent race conditions at the storage engine level, partial unique indexes guarantee that no resource can have more than one unreleased assignment:
 ```sql
@@ -143,12 +167,13 @@ The core invariant of FleetWise is that an assignment must never create a double
 ---
 
 ## 5. Results & Test Evidence
-All test results below are executed and directly sourced from `evidence/test_results.json` (**27 / 27 tests passing, 100% pass rate**).
+All test results below are executed and directly sourced from `evidence/test_results.json` (**30 / 30 tests passing, 100% pass rate**).
 
 > **Historical Test Count Reconciliation:**
 > - *Initial Sprint Baseline:* 25 tests (T1–T12, AUDIT-1, 3, 4, 5, 6, 7, 8, 9, PHASE-B1, B2, B4, B5, B6).
 > - *Sprint Hardening:* Added `AUDIT-10` (Idempotency-Key replay caching and `If-Match` stale-state protection), bringing total to 26 tests.
-> - *Comprehensive Security & Route Audit:* Added `AUDIT-11` (Unified HTTP error envelopes across Starlette 404, 405, and 400 validation, plus strict route vs resource 404 separation), bringing total to **27 distinct tests executed and passing**.
+> - *Comprehensive Security & Route Audit:* Added `AUDIT-11` (Unified HTTP error envelopes across Starlette 404, 405, and 400 validation, plus strict route vs resource 404 separation), bringing total to 27 tests.
+> - *Physical GPS & Telematics Sprint:* Added `TRK-1` (Driver Phone Validation & Modification), `TRK-2` (Session Lifecycle & Real GPS Ingestion with Assignment Linking), and `TRK-3` (Coordinate Boundaries & Offline Telemetry States), bringing total to **30 distinct tests executed and passing**.
 
 | Test ID | Test Name | Input | Expected | Observed | Status | Evidence Path |
 |---|---|---|---|---|---|---|
@@ -179,6 +204,9 @@ All test results below are executed and directly sourced from `evidence/test_res
 | **PHASE-B4**| Parallel Allocation Race Lab | Diagnostic concurrency proof endpoint with 25 parallel threads | Exactly 1 winner (`201`), 24 blocked (`409`), 0 errors (`5xx`), invariant preserved | 1 winner, 24 conflicts, 0 errors, invariant verified | **PASS** | `evidence/phase_b_racelab.json` |
 | **PHASE-B5**| Role-Based Access Control | Cookie-based session auth with scrypt hashing | Dispatcher, fleet manager, and ops lead permissions enforced | Valid authentication, role permissions verified | **PASS** | `evidence/phase_b_auth.json` |
 | **PHASE-B6**| Analytics & Route Radar | Summary metrics & route coordinate vectors | On-time rate, status funnel, driver workload, active routes | SVG charts and route vectors computed cleanly | **PASS** | `evidence/phase_b_analytics.json` |
+| **TRK-1** | Driver Phone Update & Validation | Phone PATCH endpoint with international regex check | Valid formats update phone + audit log; invalid formats return 400 | Phone format validated, audit snapshot recorded | **PASS** | `evidence/trk_1_phone_update.json` |
+| **TRK-2** | Tracking Session Lifecycle & GPS Stream | Start session, ingest coordinates, query vehicle/delivery latest, stop session | Ingestion succeeds, latest coordinates linked across vehicle/delivery/driver, Street View generated | Complete lifecycle & link verified, Street View active | **PASS** | `evidence/trk_2_lifecycle.json` |
+| **TRK-3** | GPS Boundaries & Empty States | Out-of-bounds lat/lng/accuracy, offline vehicle state | Bad coordinates return 400 `VALIDATION_ERROR`; unassigned vehicle returns offline | Boundary guards verified, offline state verified | **PASS** | `evidence/trk_3_boundaries.json` |
 
 ---
 

@@ -74,6 +74,38 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tracking_sessions (
+    session_id TEXT PRIMARY KEY,
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id),
+    delivery_id TEXT NULL REFERENCES deliveries(delivery_id),
+    device_info TEXT NULL,
+    started_at TEXT NOT NULL,
+    stopped_at TEXT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped', 'stale'))
+);
+
+CREATE TABLE IF NOT EXISTS gps_locations (
+    location_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES tracking_sessions(session_id),
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id),
+    delivery_id TEXT NULL REFERENCES deliveries(delivery_id),
+    latitude REAL NOT NULL CHECK (latitude >= -90.0 AND latitude <= 90.0),
+    longitude REAL NOT NULL CHECK (longitude >= -180.0 AND longitude <= 180.0),
+    accuracy REAL NOT NULL CHECK (accuracy >= 0),
+    speed REAL NULL,
+    heading REAL NULL,
+    device_timestamp TEXT NOT NULL,
+    server_timestamp TEXT NOT NULL,
+    is_valid INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_gps_driver_ts ON gps_locations(driver_id, server_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_gps_vehicle_ts ON gps_locations(vehicle_id, server_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_gps_delivery_ts ON gps_locations(delivery_id, server_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_gps_session_ts ON gps_locations(session_id, server_timestamp ASC);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_assignments_active_vehicle
     ON assignments(vehicle_id) WHERE released_at IS NULL;
 

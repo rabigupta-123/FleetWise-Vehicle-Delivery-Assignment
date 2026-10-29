@@ -4,11 +4,11 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136.3-green.svg)](https://fastapi.tiangolo.com/)
 [![SQLite WAL](https://img.shields.io/badge/SQLite-WAL%20Mode-orange.svg)](https://www.sqlite.org/wal.html)
-[![Tests Passing](https://img.shields.io/badge/Tests-27%20Passed%20(100%25)-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/Tests-30%20Passed%20(100%25)-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 > **IT HAPPENS @ RAALE #13 (Logistics)**  
-> Production-grade, conflict-free fleet dispatch and delivery allocation engine. Built with zero CDN dependencies, strict SQLite `BEGIN IMMEDIATE` + WAL concurrency protection, dark HUD control-room UI, and automated Smart Dispatch Advisory.
+> Production-grade, conflict-free fleet dispatch, delivery allocation engine, and real smartphone GPS tracking system. Built with zero CDN dependencies (locally vendored Leaflet & Lucide SVGs), strict SQLite `BEGIN IMMEDIATE` + WAL concurrency protection, dark HUD control-room UI, automated Smart Dispatch Advisory, and live Street View navigation.
 
 ---
 
@@ -144,10 +144,38 @@ The application starts with an **empty database**. All records enter through:
 | `POST` | `/auth/logout` | Terminate session & clear cookies | `200` |
 | `GET` | `/import/templates/{entity}.csv` | Download header-only CSV template (`vehicles`, `drivers`, `deliveries`) | `200`, `404` |
 | `POST` | `/import/{entity}?dry_run=true\|false` | Validate & import CSV or JSON array (all-or-nothing atomic transaction) | `200`, `400` |
+| `PATCH` | `/drivers/{id}/phone` | Update driver phone number (used for live smartphone tracking authorization) | `200`, `400`, `404` |
+| `POST` | `/tracking/sessions/start` | Start tracking session for a driver (links active vehicle & delivery assignment) | `201`, `400`, `404` |
+| `POST` | `/tracking/sessions/stop` | Stop active tracking session | `200`, `400`, `404` |
+| `POST` | `/tracking/location` | Ingest real device GPS fix (validates lat/lng, speed, accuracy, ISO timestamp) | `201`, `400` |
+| `GET` | `/tracking/drivers/{id}/latest` | Fetch latest GPS fix, staleness flag, and Google Street View link | `200`, `404` |
+| `GET` | `/tracking/vehicles/{id}/latest` | Fetch vehicle live location, assigned driver, active delivery, and Street View | `200`, `404` |
+| `GET` | `/tracking/deliveries/{id}/latest` | Fetch delivery location, transit trail, driver position, and corridor Street View | `200`, `404` |
+| `GET` | `/tracking/history` | Query location history trail (`?vehicle_id=`, `?delivery_id=`, `?session_id=`) | `200` |
+| `GET` | `/tracking/telemetry-graph` | Time-series telemetry points (speed km/h, accuracy m, cumulative distance km) | `200` |
 
 ---
 
-## 5. User Data Import Formats
+## 5. Real Smartphone GPS Tracking, Vehicle Tracking & Street View
+
+FleetWise supports **genuine physical device GPS tracking** using your smartphone:
+
+### How It Works:
+1. **Explicit Privacy Consent & Real Geolocation:** Coordinates are captured via the standard browser `navigator.geolocation.watchPosition()` API directly on your mobile device. The system **never** simulates or fabricates GPS fixes and never derives coordinates from phone numbers.
+2. **Driver Phone Number Authorization:** Assign or update any driver's phone number to your own mobile number using the **Change Phone #** modal.
+3. **Driver Phone GPS Portal (`View 8`):** Open `http://<your-lan-ip>:8000` on your smartphone browser, select your driver profile, and tap **Start GPS Tracking**. Your phone streams high-precision fixes (latitude, longitude, accuracy, velocity, heading) into FleetWise.
+4. **Vehicle Live GPS Radar (`View 6`):** Inspect any vehicle on an interactive Leaflet map (dark HUD styling, 100% locally vendored, zero CDN). View breadcrumb trails, real-time speed/accuracy telemetry curves, and launch **Google Maps Street View** directly at the vehicle's exact physical coordinates:
+   ```
+   https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lng}
+   ```
+5. **Delivery Transit Tracking (`View 7`):** Track the driver's progress along active delivery corridors, view pickup/dropoff points, and verify transit velocity profiles.
+6. **Zero-CDN Architecture:** Leaflet CSS/JS assets are vendored locally in `static/vendor/leaflet/` to ensure full functionality in air-gapped or restricted network environments.
+
+> **Mobile Network Note:** For security reasons, modern smartphone browsers require `localhost` or `https://` to permit `navigator.geolocation`. When testing over a local Wi-Fi network, use local port forwarding (`adb forward` or Chrome remote debugging) or access over a local development HTTPS certificate. Also keep the browser tab open, as mobile operating systems may throttle background tabs when the screen is locked.
+
+---
+
+## 6. User Data Import Formats
 
 FleetWise accepts CSV or JSON arrays for import:
 
@@ -174,15 +202,15 @@ D-002,Warehouse 12,Cargo Gate 3,2026-10-30T11:30:00Z,normal,500
 
 ---
 
-## 6. Verification & Automated Test Suite
+## 7. Verification & Automated Test Suite
 
-Execute the comprehensive automated test suite (verifying T1–T12, snapshot comparisons, 50-thread concurrency, 5x5 transition matrix, formula injection sanitization, and import validations against isolated temporary SQLite databases):
+Execute the comprehensive automated test suite (verifying T1–T12, snapshot comparisons, 50-thread concurrency, 5x5 transition matrix, formula injection sanitization, real GPS ingestion boundaries, session lifecycles, and import validations against isolated temporary SQLite databases):
 
 ```bash
 pytest -v
 ```
 
-All **27 / 27 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
+All **30 / 30 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
 
 To re-run the Playwright browser judge flow:
 ```bash

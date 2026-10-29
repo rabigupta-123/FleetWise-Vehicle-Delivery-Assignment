@@ -142,3 +142,39 @@ class DeliveryStatusPatch(BaseModel):
     status: str = Field(..., min_length=1)
     reason: Optional[str] = None
     version: Optional[int] = None
+
+
+class DriverPhonePatch(BaseModel):
+    phone: str = Field(..., min_length=7, max_length=30)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        s = v.strip()
+        if not PHONE_REGEX.match(s):
+            raise ValueError(f"Invalid phone number format: '{v}'")
+        return s
+
+
+class TrackingSessionStart(BaseModel):
+    driver_id: str = Field(..., min_length=1, max_length=50)
+    device_info: Optional[str] = Field(default=None, max_length=255)
+
+
+class TrackingSessionStop(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=50)
+
+
+class GPSLocationCreate(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=50)
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    accuracy: float = Field(..., ge=0.0)
+    speed: Optional[float] = Field(default=None, ge=0.0)
+    heading: Optional[float] = Field(default=None, ge=0.0, le=360.0)
+    device_timestamp: str = Field(..., min_length=1)
+
+    @field_validator("device_timestamp")
+    @classmethod
+    def check_ts(cls, v: str) -> str:
+        return validate_iso8601(v)

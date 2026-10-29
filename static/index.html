@@ -6,6 +6,7 @@
   <title>FleetWise — Vehicle &amp; Delivery Assignment Control Room</title>
   <link rel="stylesheet" href="/static/css/tokens.css" />
   <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
 </head>
 <body>
   <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -70,6 +71,21 @@
           <span class="nav-icon" data-icon="navigation"></span>
           <span class="nav-label">Route Radar</span>
           <kbd class="nav-kbd">M</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="vehicle-tracking">
+          <span class="nav-icon" data-icon="truck"></span>
+          <span class="nav-label">Vehicle Tracking</span>
+          <span class="nav-badge" id="nav-badge-veh-tracking">Live</span>
+        </button>
+        <button type="button" class="nav-item" data-view="delivery-tracking">
+          <span class="nav-icon" data-icon="navigation"></span>
+          <span class="nav-label">Delivery Tracking</span>
+          <span class="nav-badge" id="nav-badge-del-tracking">GPS</span>
+        </button>
+        <button type="button" class="nav-item" data-view="driver-gps">
+          <span class="nav-icon" data-icon="zap"></span>
+          <span class="nav-label">Driver Phone GPS</span>
+          <span class="nav-badge nav-badge-accent">Mobile</span>
         </button>
         <button type="button" class="nav-item" data-view="audit">
           <span class="nav-icon" data-icon="audit"></span>
@@ -751,6 +767,209 @@
           </div>
         </section>
 
+        <!-- ==================== VIEW: VEHICLE TRACKING ==================== -->
+        <section id="view-vehicle-tracking" class="view-section" aria-label="Vehicle Live GPS Tracking">
+          <div class="toolbar-panel">
+            <div>
+              <h2 class="section-title">REAL-TIME VEHICLE GPS RADAR</h2>
+              <p class="panel-desc">Interactive live telemetry, movement trails, and Google Maps Street View for fleet vehicles.</p>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-veh-tracking">
+                <span data-icon="refresh"></span><span>Refresh Telemetry</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="tracking-grid">
+            <!-- Left: Vehicle Selection & Status Card -->
+            <div class="table-card" style="padding:var(--space-lg);">
+              <label for="veh-tracking-select" class="form-label">SELECT FLEET VEHICLE</label>
+              <select id="veh-tracking-select" class="form-select mb-lg">
+                <option value="">-- Choose a Vehicle --</option>
+              </select>
+
+              <div id="veh-tracking-info" class="mt-md">
+                <div class="lane-empty">
+                  <div>Select a vehicle to inspect live telemetry and location trail.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Interactive Map & Telemetry Graph -->
+            <div>
+              <div class="tracking-map-container" id="vehicle-map"></div>
+
+              <!-- Telemetry Graph -->
+              <div class="chart-card">
+                <div class="chart-header">
+                  <div>
+                    <h3 class="panel-title" style="font-size:14px;">SPEED &amp; ACCURACY TELEMETRY GRAPH</h3>
+                    <p class="panel-desc" style="font-size:11px;">Real-time velocity profile (km/h) and GPS accuracy (m) across recorded fixes.</p>
+                  </div>
+                  <div id="veh-graph-stats" class="badge badge-accent mono">0 pts // 0.00 km</div>
+                </div>
+                <div class="chart-svg-wrap" id="veh-telemetry-svg">
+                  <div class="lane-empty" style="padding:40px 0;"><div>Awaiting vehicle GPS data points...</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW: DELIVERY TRACKING ==================== -->
+        <section id="view-delivery-tracking" class="view-section" aria-label="Delivery GPS Corridor &amp; Real-time Progress">
+          <div class="toolbar-panel">
+            <div>
+              <h2 class="section-title">DELIVERY CORRIDOR &amp; DRIVER TRAIL</h2>
+              <p class="panel-desc">Track active delivery transit corridors, driver GPS breadcrumbs, and street-level vantage points.</p>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-del-tracking">
+                <span data-icon="refresh"></span><span>Refresh Corridor</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="tracking-grid">
+            <!-- Left: Delivery Selection & Metadata -->
+            <div class="table-card" style="padding:var(--space-lg);">
+              <label for="del-tracking-select" class="form-label">SELECT DELIVERY</label>
+              <select id="del-tracking-select" class="form-select mb-lg">
+                <option value="">-- Choose a Delivery --</option>
+              </select>
+
+              <div id="del-tracking-info" class="mt-md">
+                <div class="lane-empty">
+                  <div>Select an active or pending delivery to view corridor &amp; driver signal.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Interactive Delivery Map & Street View Launchers -->
+            <div>
+              <div class="tracking-map-container" id="delivery-map"></div>
+
+              <!-- Telemetry Graph -->
+              <div class="chart-card">
+                <div class="chart-header">
+                  <div>
+                    <h3 class="panel-title" style="font-size:14px;">DELIVERY TRANSIT TELEMETRY GRAPH</h3>
+                    <p class="panel-desc" style="font-size:11px;">Speed profile and movement velocity recorded during transit.</p>
+                  </div>
+                  <div id="del-graph-stats" class="badge badge-accent mono">0 pts // 0.00 km</div>
+                </div>
+                <div class="chart-svg-wrap" id="del-telemetry-svg">
+                  <div class="lane-empty" style="padding:40px 0;"><div>Awaiting transit GPS fixes...</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW: DRIVER PHONE GPS PORTAL ==================== -->
+        <section id="view-driver-gps" class="view-section" aria-label="Driver Mobile Phone GPS Tracking Portal">
+          <div class="toolbar-panel">
+            <div>
+              <h2 class="section-title">DRIVER SMARTPHONE GPS TRACKING PORTAL</h2>
+              <p class="panel-desc">Authorize and stream real smartphone browser GPS fixes into FleetWise via HTML5 Geolocation API.</p>
+            </div>
+          </div>
+
+          <!-- Consent Banner -->
+          <div class="consent-banner">
+            <span class="consent-icon" data-icon="alertTriangle"></span>
+            <div>
+              <strong>Explicit Privacy &amp; Consent Notice:</strong>
+              By clicking "Start GPS Tracking", your browser will request permission to access your device's physical GPS location. Location fixes (coordinates, accuracy, speed, heading) are streamed securely to the FleetWise backend only while tracking is active. You can stop tracking at any time.
+            </div>
+          </div>
+
+          <div class="grid grid-2" style="gap:var(--space-xl);">
+            <!-- Driver Identity & Controls -->
+            <div class="table-card" style="padding:var(--space-xl);">
+              <h3 class="panel-title mb-md">1. TEST DRIVER IDENTIFICATION</h3>
+
+              <div class="form-group mb-lg">
+                <label for="driver-gps-select" class="form-label">ASSIGNED DRIVER PROFILE</label>
+                <select id="driver-gps-select" class="form-select">
+                  <option value="">-- Select Driver to Track --</option>
+                </select>
+              </div>
+
+              <div id="driver-selected-card" class="mb-lg p-md" style="background:var(--color-secondary); border-radius:var(--radius-md);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <strong id="driver-card-name">No driver selected</strong>
+                    <div class="kpi-sub" id="driver-card-phone">Phone: —</div>
+                  </div>
+                  <button type="button" class="btn btn-ghost btn-xs" id="btn-edit-driver-phone">
+                    <span data-icon="edit"></span><span>Change Phone #</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group mb-xl">
+                <label for="driver-device-info" class="form-label">DEVICE IDENTIFIER (OPTIONAL)</label>
+                <input type="text" id="driver-device-info" class="form-input" placeholder="e.g. iPhone 15 / Galaxy S24" />
+              </div>
+
+              <div style="display:flex; gap:var(--space-md);">
+                <button type="button" class="btn btn-primary" id="btn-start-gps" style="flex:1;">
+                  <span data-icon="zap"></span><span>Start GPS Tracking</span>
+                </button>
+                <button type="button" class="btn btn-danger" id="btn-stop-gps" style="flex:1;" disabled>
+                  <span>Stop Tracking</span>
+                </button>
+              </div>
+
+              <div class="kpi-sub mt-md" style="font-size:11px; line-height:1.4;">
+                * Note: Mobile browser tabs may suspend GPS collection if the phone is locked or screen is turned off. For continuous field operations, keep the browser tab open.
+              </div>
+            </div>
+
+            <!-- Live GPS Status Display -->
+            <div class="table-card" style="padding:var(--space-xl);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-lg);">
+                <h3 class="panel-title">2. REAL-TIME DEVICE TELEMETRY</h3>
+                <span class="status-badge status-inactive" id="gps-status-badge">STOPPED</span>
+              </div>
+
+              <div class="telemetry-cards">
+                <div class="telemetry-card">
+                  <span class="telemetry-label">Latitude</span>
+                  <span class="telemetry-value" id="disp-lat">—</span>
+                </div>
+                <div class="telemetry-card">
+                  <span class="telemetry-label">Longitude</span>
+                  <span class="telemetry-value" id="disp-lng">—</span>
+                </div>
+                <div class="telemetry-card">
+                  <span class="telemetry-label">Accuracy</span>
+                  <span class="telemetry-value" id="disp-acc">—</span>
+                  <span class="telemetry-sub" id="disp-acc-sub">Waiting fix</span>
+                </div>
+                <div class="telemetry-card">
+                  <span class="telemetry-label">Speed</span>
+                  <span class="telemetry-value" id="disp-speed">—</span>
+                  <span class="telemetry-sub">km / h</span>
+                </div>
+              </div>
+
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:var(--space-md) 0; border-top:1px solid var(--color-border);">
+                <div>
+                  <span class="kpi-sub">Total Fixes:</span> <strong class="mono" id="disp-fixes-count">0</strong>
+                  &bull; <span class="kpi-sub">Last Ping:</span> <span class="mono" id="disp-last-ping">Never</span>
+                </div>
+                <div id="disp-streetview-wrap"></div>
+              </div>
+
+              <!-- Mini map for driver feedback -->
+              <div class="tracking-map-container mt-md" id="driver-mini-map" style="height:220px;"></div>
+            </div>
+          </div>
+        </section>
+
         <!-- ==================== VIEW 10: AUDIT LOG ==================== -->
         <section id="view-audit" class="view-section" aria-label="System Audit Log">
           <div class="toolbar-panel">
@@ -990,9 +1209,39 @@
     </div>
   </div>
 
+  <!-- Modal: Update Driver Phone Number -->
+  <div class="modal-backdrop hidden" id="modal-driver-phone" role="dialog" aria-modal="true" aria-labelledby="modal-phone-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-phone-title">Update Driver Phone Number</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-driver-phone" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-driver-phone">
+        <div class="modal-body">
+          <input type="hidden" id="phone-driver-id" />
+          <div class="form-group mb-md">
+            <label class="form-label">Driver Name</label>
+            <div id="phone-driver-name" class="mono font-bold" style="color:var(--color-primary);"></div>
+          </div>
+          <div class="form-group">
+            <label for="phone-input" class="form-label">New Phone Number (Your Smartphone)</label>
+            <input type="tel" id="phone-input" class="form-input" placeholder="+1-555-019-2834 or +91-9876543210" required />
+            <div class="kpi-sub mt-xs" style="font-size:11px;">Must be a valid international or domestic phone format (min 7 digits).</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-driver-phone">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Phone Number</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Toast Stack -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
+  <!-- Local Vendored Leaflet Map Engine (Zero CDN Dependency) -->
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
   <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>
