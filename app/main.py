@@ -149,6 +149,8 @@ async def login(request: Request, response: Response):
         raise AppError(400, "VALIDATION_ERROR", "Invalid JSON payload.")
     username = str(body.get("username") or "").strip()
     password = str(body.get("password") or "").strip()
+    if not username or not password:
+        raise AppError(400, "VALIDATION_ERROR", "Username and password are required.")
 
     with read_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
@@ -270,13 +272,15 @@ def get_audit():
 # REAL-TIME SERVER-SENT EVENTS (B3)
 # -------------------------------------------------------------------------
 @app.get("/events")
-async def sse_events(request: Request):
+async def sse_events(request: Request, single_ping: bool = False):
     queue: asyncio.Queue = asyncio.Queue()
     SSE_SUBSCRIBERS.add(queue)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
             yield "event: ping\ndata: connected\n\n"
+            if single_ping:
+                return
             while True:
                 if await request.is_disconnected():
                     break
@@ -606,6 +610,7 @@ def request_driver_phone_verification(driver_id: str, request: Request):
             "expires_at": exp_str,
             "mode": "development",
             "dev_verification_code": code,
+            "dev_challenge_code": code,
             "message": f"Verification challenge created for {phone_e164}. Enter the 6-digit code to complete verification.",
         }
         write_audit(conn, actor=actor, action="request_phone_verification", entity="driver", entity_id=driver_id, after={"verification_id": verification_id, "phone_e164": phone_e164})
@@ -654,6 +659,7 @@ def verify_driver_phone(driver_id: str, body: PhoneVerifyCodeRequest, request: R
             conn.execute("UPDATE drivers SET phone_verification_status = 'verified' WHERE driver_id = ?", (driver_id,))
             result = {
                 "status": "verified",
+                "verified": True,
                 "driver_id": driver_id,
                 "phone_e164": vrf["phone_e164"],
                 "message": "Phone number successfully verified.",
@@ -1108,6 +1114,7 @@ def assign_delivery(
             "delivery_id": delivery_id,
             "vehicle_id": body.vehicle_id,
             "driver_id": body.driver_id,
+            "status": "assigned",
             "assigned_at": now_str,
             "new_version": delivery["version"] + 1,
         }
@@ -1702,7 +1709,7 @@ def get_device_details(device_id: str):
 
 
 @app.post("/devices/{device_id}/revoke")
-def revoke_device(device_id: str, body: DeviceRevokeRequest, request: Request):
+def revoke_device(device_id: str, request: Request, body: Optional[DeviceRevokeRequest] = None):
     user = get_current_user(request)
     check_permission(user, "drivers")
     actor = user["username"] if user else "operator"

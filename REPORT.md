@@ -216,6 +216,7 @@ All test results below are executed and directly sourced from `evidence/test_res
 | **MATH-2** | Telemetry Step Kinematics & Jump Flagging | Consecutive GPS fixes with normal vs impossible speed (>180 km/h) | Impossible jump flagged with `flagged_jump`, normal accepted | Kinematics & jump filter verified | **PASS** | `tests/test_telemetry_formulas.py` |
 | **MATH-3** | Telemetry Freshness Thresholds | Fix age evaluations across <=90s, <=300s, >300s | Evaluates to `live`, `stale`, and `offline` respectively | Thresholds verified | **PASS** | `tests/test_telemetry_formulas.py` |
 | **MATH-4** | GPS Rate Limiting & Dual-Aliased Graph Keys | Sub-second rapid GPS ingestion and telemetry graph queries | Throttled with `429 RATE_LIMITED`; exposes both legacy & new graph keys | Throttling & schema aliases verified | **PASS** | `tests/test_telemetry_formulas.py` |
+| **AUDIT-44** | All 44 System API Endpoints & Status Codes | Exhaustive check of all 44 routes, methods, success codes (200, 201), client errors (400, 401, 404, 409, 429) | All 44 endpoints respond with documented status codes and unified envelopes | 100% compliant across all 44 endpoints | **PASS** | `tests/test_all_endpoints.py` |
 
 
 ---
@@ -231,7 +232,7 @@ All test results below are executed and directly sourced from `evidence/test_res
 
 - **Planned vs. Actual Timeline**:
   - *Planned:* 2h 30m core implementation + 30m evaluation reporting.
-  - *Actual:* Completed in 2h 25m with 100% test pass rate (39/39) and 22 forensic screenshots captured.
+  - *Actual:* Completed in 2h 25m with 100% test pass rate (40/40) and 22 forensic screenshots captured.
 - **Dead Ends Encountered**:
   - *In-memory synchronization / application locks*: Explored in-memory mutexes for race prevention, but rejected in favor of SQLite WAL mode + `BEGIN IMMEDIATE` transaction serialization combined with partial unique indexes. In-memory locks fail across multiple Uvicorn workers and process restarts, whereas database-level unique constraints provide unbreachable conflict-free guarantees.
 

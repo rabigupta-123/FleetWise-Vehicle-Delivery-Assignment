@@ -133,3 +133,4 @@ def test_device_negative_cases(client: TestClient, temp_db: str):
     res_bad_rev = client.post("/devices/DEV-NONEXISTENT/revoke", json={"reason": "test"})
     assert res_bad_rev.status_code == 404
     assert res_bad_rev.json()["error"] == "NOT_FOUND"
+

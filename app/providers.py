@@ -96,3 +96,4 @@ class UnconfiguredIPGeolocationProvider(BaseIPGeolocationProvider):
             "is_gps_sensor": False,
             "note": "IP geolocation indicates network routing geography only, never physical device GPS coordinates.",
         }
+

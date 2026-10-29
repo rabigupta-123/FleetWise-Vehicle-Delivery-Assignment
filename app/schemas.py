@@ -22,7 +22,7 @@ PHONE_REGEX = re.compile(r"^\+?[0-9\-\s\(\)]{7,30}$")
 class VehicleCreate(BaseModel):
     vehicle_id: Optional[str] = Field(default=None, max_length=50)
     registration_no: str = Field(..., min_length=1, max_length=50)
-    type: str = Field(..., min_length=1, max_length=50)
+    type: str = Field(default="Van", min_length=1, max_length=50)
     capacity: int = Field(..., gt=0)
     status: Literal["available", "maintenance", "inactive"] = "available"
 

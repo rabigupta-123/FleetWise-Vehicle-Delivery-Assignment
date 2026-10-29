@@ -77,3 +77,4 @@ def test_phone_verification_challenge_flow(client: TestClient, temp_db: str):
     })
     assert res_re.status_code == 400
     assert res_re.json()["error"] == "CHALLENGE_INACTIVE"
+

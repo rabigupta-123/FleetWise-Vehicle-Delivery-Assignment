@@ -131,3 +131,4 @@ def test_gps_ingestion_rate_limiting_and_dual_aliased_telemetry(client: TestClie
     assert g["points_count"] == 2
     assert len(g["points"]) == 2
     assert len(g["data_points"]) == 2
+

@@ -975,6 +975,49 @@
           </div>
         </section>
 
+        <!-- ==================== VIEW: DEVICE INVENTORY ==================== -->
+        <section id="view-devices" class="view-section" aria-label="Device Inventory &amp; Telemetry Registry">
+          <div class="toolbar-panel">
+            <div>
+              <h2 class="section-title">AUTHENTICATED DEVICE INVENTORY</h2>
+              <p class="panel-desc">Manage registered smartphone sessions, browser capability flags, and revocation guards.</p>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-open-register-device">
+                <span data-icon="plus"></span><span>Register Device</span>
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-devices">
+                <span data-icon="refresh"></span><span>Refresh Devices</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-card">
+            <div class="table-responsive">
+              <table class="data-table" id="devices-table">
+                <thead>
+                  <tr>
+                    <th>Device ID</th>
+                    <th>Assigned Driver</th>
+                    <th>Nickname</th>
+                    <th>OS / Browser</th>
+                    <th>Permission</th>
+                    <th>Last Known IP</th>
+                    <th>Last Seen</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="devices-tbody">
+                  <tr>
+                    <td colspan="9" class="empty-cell">Loading registered devices...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
                 <!-- ==================== VIEW: DEVICE INVENTORY ==================== -->
         <section id="view-devices" class="view-section" aria-label="Device Inventory &amp; Telemetry Registry">
           <div class="toolbar-panel">
@@ -1107,6 +1150,82 @@
     </div>
   </div>
 
+  <!-- Modal: Register Device -->
+  <div class="modal-backdrop hidden" id="modal-device-register" role="dialog" aria-modal="true" aria-labelledby="modal-dev-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-dev-title">Register Test Smartphone / Browser Device</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-device-register" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-device-register">
+        <div class="modal-body">
+          <div class="form-group mb-md">
+            <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
+            <select id="dev-reg-driver" class="form-select" required>
+              <option value="">-- Select Driver --</option>
+            </select>
+          </div>
+          <div class="form-group mb-md">
+            <label for="dev-reg-nickname" class="form-label">DEVICE NICKNAME</label>
+            <input type="text" id="dev-reg-nickname" class="form-input" placeholder="e.g. Personal iPhone 15 / Galaxy S24" required />
+          </div>
+          <div class="grid grid-2 mb-md" style="gap:var(--space-md);">
+            <div class="form-group">
+              <label for="dev-reg-os" class="form-label">OS FAMILY</label>
+              <input type="text" id="dev-reg-os" class="form-input" placeholder="iOS / Android / Windows" />
+            </div>
+            <div class="form-group">
+              <label for="dev-reg-browser" class="form-label">BROWSER</label>
+              <input type="text" id="dev-reg-browser" class="form-input" placeholder="Safari / Chrome" />
+            </div>
+          </div>
+          <div class="kpi-sub" style="font-size:11px;">
+            Note: Platform info is extracted client-side from navigator context. Hardware identifiers (IMEI/IMSI) are never accessed.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-device-register">Cancel</button>
+          <button type="submit" class="btn btn-primary">Register Device</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Phone Verification Code -->
+  <div class="modal-backdrop hidden" id="modal-phone-verify" role="dialog" aria-modal="true" aria-labelledby="modal-vrf-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-vrf-title">Verify Driver Phone Number</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-phone-verify" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-phone-verify">
+        <div class="modal-body">
+          <input type="hidden" id="verify-driver-id" />
+          <input type="hidden" id="verify-challenge-id" />
+          <div class="mb-md">
+            <span class="kpi-sub">Driver:</span> <strong id="verify-driver-name" class="mono"></strong><br />
+            <span class="kpi-sub">Target Number (E.164):</span> <code id="verify-phone-e164" class="mono font-bold" style="color:var(--color-primary);"></code>
+          </div>
+
+          <div id="verify-dev-hint" class="p-sm mb-md" style="background:rgba(0, 229, 255, 0.1); border:1px solid var(--color-accent); border-radius:var(--radius-sm); font-size:12px;">
+            <div><strong>Verification Challenge Active</strong></div>
+            <div id="verify-dev-code-display" class="mono font-bold mt-xs" style="color:var(--color-accent); font-size:14px;">Code: ------</div>
+            <div class="kpi-sub mt-xs" style="font-size:11px;">In development test mode, enter the generated 6-digit challenge code above.</div>
+          </div>
+
+          <div class="form-group">
+            <label for="verify-code-input" class="form-label">ENTER 6-DIGIT VERIFICATION CODE</label>
+            <input type="text" id="verify-code-input" class="form-input mono" placeholder="123456" maxlength="8" required style="font-size:18px; letter-spacing:4px; text-align:center;" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-phone-verify">Cancel</button>
+          <button type="submit" class="btn btn-primary">Confirm Verification</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Create Driver Modal -->
   <div class="modal-backdrop hidden" id="modal-driver" role="dialog" aria-modal="true" aria-labelledby="modal-driver-title">
     <div class="modal-dialog">
@@ -1142,6 +1261,82 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-close-modal="modal-driver">Cancel</button>
           <button type="submit" class="btn btn-primary">Create Driver</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Register Device -->
+  <div class="modal-backdrop hidden" id="modal-device-register" role="dialog" aria-modal="true" aria-labelledby="modal-dev-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-dev-title">Register Test Smartphone / Browser Device</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-device-register" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-device-register">
+        <div class="modal-body">
+          <div class="form-group mb-md">
+            <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
+            <select id="dev-reg-driver" class="form-select" required>
+              <option value="">-- Select Driver --</option>
+            </select>
+          </div>
+          <div class="form-group mb-md">
+            <label for="dev-reg-nickname" class="form-label">DEVICE NICKNAME</label>
+            <input type="text" id="dev-reg-nickname" class="form-input" placeholder="e.g. Personal iPhone 15 / Galaxy S24" required />
+          </div>
+          <div class="grid grid-2 mb-md" style="gap:var(--space-md);">
+            <div class="form-group">
+              <label for="dev-reg-os" class="form-label">OS FAMILY</label>
+              <input type="text" id="dev-reg-os" class="form-input" placeholder="iOS / Android / Windows" />
+            </div>
+            <div class="form-group">
+              <label for="dev-reg-browser" class="form-label">BROWSER</label>
+              <input type="text" id="dev-reg-browser" class="form-input" placeholder="Safari / Chrome" />
+            </div>
+          </div>
+          <div class="kpi-sub" style="font-size:11px;">
+            Note: Platform info is extracted client-side from navigator context. Hardware identifiers (IMEI/IMSI) are never accessed.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-device-register">Cancel</button>
+          <button type="submit" class="btn btn-primary">Register Device</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Phone Verification Code -->
+  <div class="modal-backdrop hidden" id="modal-phone-verify" role="dialog" aria-modal="true" aria-labelledby="modal-vrf-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-vrf-title">Verify Driver Phone Number</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-phone-verify" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-phone-verify">
+        <div class="modal-body">
+          <input type="hidden" id="verify-driver-id" />
+          <input type="hidden" id="verify-challenge-id" />
+          <div class="mb-md">
+            <span class="kpi-sub">Driver:</span> <strong id="verify-driver-name" class="mono"></strong><br />
+            <span class="kpi-sub">Target Number (E.164):</span> <code id="verify-phone-e164" class="mono font-bold" style="color:var(--color-primary);"></code>
+          </div>
+
+          <div id="verify-dev-hint" class="p-sm mb-md" style="background:rgba(0, 229, 255, 0.1); border:1px solid var(--color-accent); border-radius:var(--radius-sm); font-size:12px;">
+            <div><strong>Verification Challenge Active</strong></div>
+            <div id="verify-dev-code-display" class="mono font-bold mt-xs" style="color:var(--color-accent); font-size:14px;">Code: ------</div>
+            <div class="kpi-sub mt-xs" style="font-size:11px;">In development test mode, enter the generated 6-digit challenge code above.</div>
+          </div>
+
+          <div class="form-group">
+            <label for="verify-code-input" class="form-label">ENTER 6-DIGIT VERIFICATION CODE</label>
+            <input type="text" id="verify-code-input" class="form-input mono" placeholder="123456" maxlength="8" required style="font-size:18px; letter-spacing:4px; text-align:center;" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-phone-verify">Cancel</button>
+          <button type="submit" class="btn btn-primary">Confirm Verification</button>
         </div>
       </form>
     </div>
@@ -1192,6 +1387,82 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-close-modal="modal-delivery">Cancel</button>
           <button type="submit" class="btn btn-primary">Create Pending Delivery</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Register Device -->
+  <div class="modal-backdrop hidden" id="modal-device-register" role="dialog" aria-modal="true" aria-labelledby="modal-dev-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-dev-title">Register Test Smartphone / Browser Device</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-device-register" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-device-register">
+        <div class="modal-body">
+          <div class="form-group mb-md">
+            <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
+            <select id="dev-reg-driver" class="form-select" required>
+              <option value="">-- Select Driver --</option>
+            </select>
+          </div>
+          <div class="form-group mb-md">
+            <label for="dev-reg-nickname" class="form-label">DEVICE NICKNAME</label>
+            <input type="text" id="dev-reg-nickname" class="form-input" placeholder="e.g. Personal iPhone 15 / Galaxy S24" required />
+          </div>
+          <div class="grid grid-2 mb-md" style="gap:var(--space-md);">
+            <div class="form-group">
+              <label for="dev-reg-os" class="form-label">OS FAMILY</label>
+              <input type="text" id="dev-reg-os" class="form-input" placeholder="iOS / Android / Windows" />
+            </div>
+            <div class="form-group">
+              <label for="dev-reg-browser" class="form-label">BROWSER</label>
+              <input type="text" id="dev-reg-browser" class="form-input" placeholder="Safari / Chrome" />
+            </div>
+          </div>
+          <div class="kpi-sub" style="font-size:11px;">
+            Note: Platform info is extracted client-side from navigator context. Hardware identifiers (IMEI/IMSI) are never accessed.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-device-register">Cancel</button>
+          <button type="submit" class="btn btn-primary">Register Device</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Phone Verification Code -->
+  <div class="modal-backdrop hidden" id="modal-phone-verify" role="dialog" aria-modal="true" aria-labelledby="modal-vrf-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-vrf-title">Verify Driver Phone Number</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-phone-verify" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-phone-verify">
+        <div class="modal-body">
+          <input type="hidden" id="verify-driver-id" />
+          <input type="hidden" id="verify-challenge-id" />
+          <div class="mb-md">
+            <span class="kpi-sub">Driver:</span> <strong id="verify-driver-name" class="mono"></strong><br />
+            <span class="kpi-sub">Target Number (E.164):</span> <code id="verify-phone-e164" class="mono font-bold" style="color:var(--color-primary);"></code>
+          </div>
+
+          <div id="verify-dev-hint" class="p-sm mb-md" style="background:rgba(0, 229, 255, 0.1); border:1px solid var(--color-accent); border-radius:var(--radius-sm); font-size:12px;">
+            <div><strong>Verification Challenge Active</strong></div>
+            <div id="verify-dev-code-display" class="mono font-bold mt-xs" style="color:var(--color-accent); font-size:14px;">Code: ------</div>
+            <div class="kpi-sub mt-xs" style="font-size:11px;">In development test mode, enter the generated 6-digit challenge code above.</div>
+          </div>
+
+          <div class="form-group">
+            <label for="verify-code-input" class="form-label">ENTER 6-DIGIT VERIFICATION CODE</label>
+            <input type="text" id="verify-code-input" class="form-input mono" placeholder="123456" maxlength="8" required style="font-size:18px; letter-spacing:4px; text-align:center;" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-phone-verify">Cancel</button>
+          <button type="submit" class="btn btn-primary">Confirm Verification</button>
         </div>
       </form>
     </div>
@@ -1280,6 +1551,82 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-close-modal="modal-driver-phone">Cancel</button>
           <button type="submit" class="btn btn-primary">Save Phone Number</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Register Device -->
+  <div class="modal-backdrop hidden" id="modal-device-register" role="dialog" aria-modal="true" aria-labelledby="modal-dev-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-dev-title">Register Test Smartphone / Browser Device</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-device-register" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-device-register">
+        <div class="modal-body">
+          <div class="form-group mb-md">
+            <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
+            <select id="dev-reg-driver" class="form-select" required>
+              <option value="">-- Select Driver --</option>
+            </select>
+          </div>
+          <div class="form-group mb-md">
+            <label for="dev-reg-nickname" class="form-label">DEVICE NICKNAME</label>
+            <input type="text" id="dev-reg-nickname" class="form-input" placeholder="e.g. Personal iPhone 15 / Galaxy S24" required />
+          </div>
+          <div class="grid grid-2 mb-md" style="gap:var(--space-md);">
+            <div class="form-group">
+              <label for="dev-reg-os" class="form-label">OS FAMILY</label>
+              <input type="text" id="dev-reg-os" class="form-input" placeholder="iOS / Android / Windows" />
+            </div>
+            <div class="form-group">
+              <label for="dev-reg-browser" class="form-label">BROWSER</label>
+              <input type="text" id="dev-reg-browser" class="form-input" placeholder="Safari / Chrome" />
+            </div>
+          </div>
+          <div class="kpi-sub" style="font-size:11px;">
+            Note: Platform info is extracted client-side from navigator context. Hardware identifiers (IMEI/IMSI) are never accessed.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-device-register">Cancel</button>
+          <button type="submit" class="btn btn-primary">Register Device</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Phone Verification Code -->
+  <div class="modal-backdrop hidden" id="modal-phone-verify" role="dialog" aria-modal="true" aria-labelledby="modal-vrf-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-vrf-title">Verify Driver Phone Number</h3>
+        <button type="button" class="modal-close" data-close-modal="modal-phone-verify" aria-label="Close modal">&times;</button>
+      </div>
+      <form id="form-phone-verify">
+        <div class="modal-body">
+          <input type="hidden" id="verify-driver-id" />
+          <input type="hidden" id="verify-challenge-id" />
+          <div class="mb-md">
+            <span class="kpi-sub">Driver:</span> <strong id="verify-driver-name" class="mono"></strong><br />
+            <span class="kpi-sub">Target Number (E.164):</span> <code id="verify-phone-e164" class="mono font-bold" style="color:var(--color-primary);"></code>
+          </div>
+
+          <div id="verify-dev-hint" class="p-sm mb-md" style="background:rgba(0, 229, 255, 0.1); border:1px solid var(--color-accent); border-radius:var(--radius-sm); font-size:12px;">
+            <div><strong>Verification Challenge Active</strong></div>
+            <div id="verify-dev-code-display" class="mono font-bold mt-xs" style="color:var(--color-accent); font-size:14px;">Code: ------</div>
+            <div class="kpi-sub mt-xs" style="font-size:11px;">In development test mode, enter the generated 6-digit challenge code above.</div>
+          </div>
+
+          <div class="form-group">
+            <label for="verify-code-input" class="form-label">ENTER 6-DIGIT VERIFICATION CODE</label>
+            <input type="text" id="verify-code-input" class="form-input mono" placeholder="123456" maxlength="8" required style="font-size:18px; letter-spacing:4px; text-align:center;" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-phone-verify">Cancel</button>
+          <button type="submit" class="btn btn-primary">Confirm Verification</button>
         </div>
       </form>
     </div>

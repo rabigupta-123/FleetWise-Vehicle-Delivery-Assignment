@@ -163,3 +163,4 @@ def normalize_phone_number(raw_phone: str, default_region: str = "IN") -> Dict[s
             "carrier_name": None,
             "error": f"Failed to parse phone number: {str(exc)}",
         }
+

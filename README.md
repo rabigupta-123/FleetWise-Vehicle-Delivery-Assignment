@@ -4,7 +4,7 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136.3-green.svg)](https://fastapi.tiangolo.com/)
 [![SQLite WAL](https://img.shields.io/badge/SQLite-WAL%20Mode-orange.svg)](https://www.sqlite.org/wal.html)
-[![Tests Passing](https://img.shields.io/badge/Tests-39%20Passed%20(100%25)-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/Tests-40%20Passed%20(100%25)-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 > **IT HAPPENS @ RAALE #13 (Logistics)**  
@@ -255,7 +255,7 @@ Execute the comprehensive automated test suite (verifying T1–T12, snapshot com
 pytest -v
 ```
 
-All **39 / 39 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
+All **40 / 40 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
 
 To re-run the Playwright browser judge flow:
 ```bash
