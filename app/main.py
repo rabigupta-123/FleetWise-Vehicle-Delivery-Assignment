@@ -1,15 +1,17 @@
 import asyncio
 import csv
 import hashlib
+import hmac
 import io
 import json
 import re
+import secrets
 import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
@@ -51,14 +53,24 @@ from app.schemas import (
     AssignRequest,
     DeliveryCreate,
     DeliveryStatusPatch,
+    DeviceRegisterRequest,
+    DeviceRevokeRequest,
     DriverCreate,
     DriverPhonePatch,
     DriverStatusPatch,
     GPSLocationCreate,
+    PhoneVerificationRequest,
+    PhoneVerifyCodeRequest,
     TrackingSessionStart,
     TrackingSessionStop,
     VehicleCreate,
     VehicleStatusPatch,
+)
+from app.telematics import (
+    compute_freshness_status,
+    evaluate_telemetry_step,
+    haversine_distance_meters,
+    normalize_phone_number,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -395,7 +407,8 @@ def list_drivers():
     with read_conn() as conn:
         rows = conn.execute(
             """
-            SELECT d.driver_id, d.name, d.phone, d.availability_status,
+            SELECT d.driver_id, d.name, d.phone, d.phone_e164, d.phone_verification_status,
+                   d.phone_country_code, d.phone_carrier, d.availability_status,
                    a.delivery_id AS active_delivery_id
             FROM drivers d
             LEFT JOIN assignments a ON a.driver_id = d.driver_id AND a.released_at IS NULL
@@ -429,18 +442,27 @@ def create_driver(body: DriverCreate, request: Request):
                 max_num += 1
                 final_id = f"DR-{max_num:03d}"
 
+        norm = normalize_phone_number(body.phone)
+        phone_e164 = norm["phone_e164"] if norm["is_valid"] else None
+        phone_cc = norm["country_code"] if norm["is_valid"] else None
+        phone_carr = norm["carrier_name"] if norm["is_valid"] else None
+
         conn.execute(
             """
-            INSERT INTO drivers (driver_id, name, phone, availability_status)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO drivers (driver_id, name, phone, phone_e164, phone_verification_status, phone_country_code, phone_carrier, availability_status)
+            VALUES (?, ?, ?, ?, 'unverified', ?, ?, ?)
             """,
-            (final_id, body.name, body.phone, body.availability_status),
+            (final_id, body.name, body.phone, phone_e164, phone_cc, phone_carr, body.availability_status),
         )
 
         after_data = {
             "driver_id": final_id,
             "name": body.name,
             "phone": body.phone,
+            "phone_e164": phone_e164,
+            "phone_verification_status": "unverified",
+            "phone_country_code": phone_cc,
+            "phone_carrier": phone_carr,
             "availability_status": body.availability_status,
         }
         write_audit(conn, actor=actor, action="create", entity="driver", entity_id=final_id, after=after_data)
@@ -492,18 +514,164 @@ def patch_driver_phone(driver_id: str, body: DriverPhonePatch, request: Request)
     actor = user["username"] if user else "operator"
 
     clean_phone = body.phone.strip()
+    norm = normalize_phone_number(clean_phone)
+    if not norm["is_valid"]:
+        raise AppError(400, "VALIDATION_ERROR", norm["error"] or f"Invalid phone number format: '{clean_phone}'")
+
     with immediate_transaction() as conn:
         row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone()
         if not row:
             raise AppError(404, "NOT_FOUND", f"Driver '{driver_id}' not found.")
         current_drv = dict(row)
 
-        conn.execute("UPDATE drivers SET phone = ? WHERE driver_id = ?", (clean_phone, driver_id))
-        after_drv = {**current_drv, "phone": clean_phone}
+        conn.execute(
+            """
+            UPDATE drivers
+            SET phone = ?, phone_e164 = ?, phone_country_code = ?, phone_carrier = ?, phone_verification_status = 'unverified'
+            WHERE driver_id = ?
+            """,
+            (clean_phone, norm["phone_e164"], norm["country_code"], norm["carrier_name"], driver_id),
+        )
+        after_drv = {
+            **current_drv,
+            "phone": clean_phone,
+            "phone_e164": norm["phone_e164"],
+            "phone_country_code": norm["country_code"],
+            "phone_carrier": norm["carrier_name"],
+            "phone_verification_status": "unverified",
+        }
         write_audit(conn, actor=actor, action="update_phone", entity="driver", entity_id=driver_id, before=current_drv, after=after_drv)
 
     broadcast_event("driver_phone_updated", after_drv)
     return after_drv
+
+
+@app.post("/drivers/{driver_id}/phone/request-verification")
+def request_driver_phone_verification(driver_id: str, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Driver '{driver_id}' not found.")
+        drv = dict(row)
+        phone_e164 = drv.get("phone_e164") or drv.get("phone")
+
+        # Rate limit verification requests (max 5 in 10 minutes)
+        recent_cnt = conn.execute(
+            """
+            SELECT COUNT(*) as cnt FROM phone_verifications
+            WHERE driver_id = ? AND created_at >= datetime('now', '-10 minutes')
+            """,
+            (driver_id,),
+        ).fetchone()["cnt"]
+
+        if recent_cnt >= 5:
+            raise AppError(429, "RATE_LIMITED", "Too many verification requests. Please wait 10 minutes before requesting a new challenge.")
+
+        # Expire any previous pending verifications
+        conn.execute(
+            "UPDATE phone_verifications SET status = 'expired' WHERE driver_id = ? AND status = 'pending'",
+            (driver_id,),
+        )
+
+        code = f"{secrets.randbelow(900000) + 100000}"
+        code_hash = hashlib.sha256((code + driver_id).encode()).hexdigest()
+        verification_id = f"VRF-{uuid.uuid4().hex[:10].upper()}"
+        now_str = utc_now_iso()
+        exp_str = (datetime.now(timezone.utc) + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        conn.execute(
+            """
+            INSERT INTO phone_verifications (
+                verification_id, driver_id, phone_e164, code_hash, expires_at, attempts_remaining, status, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, 3, 'pending', ?)
+            """,
+            (verification_id, driver_id, phone_e164, code_hash, exp_str, now_str),
+        )
+
+        conn.execute(
+            "UPDATE drivers SET phone_verification_status = 'pending' WHERE driver_id = ?",
+            (driver_id,),
+        )
+
+        challenge_data = {
+            "verification_id": verification_id,
+            "driver_id": driver_id,
+            "phone_e164": phone_e164,
+            "status": "pending",
+            "expires_at": exp_str,
+            "mode": "development",
+            "dev_verification_code": code,
+            "message": f"Verification challenge created for {phone_e164}. Enter the 6-digit code to complete verification.",
+        }
+        write_audit(conn, actor=actor, action="request_phone_verification", entity="driver", entity_id=driver_id, after={"verification_id": verification_id, "phone_e164": phone_e164})
+
+    return challenge_data
+
+
+@app.post("/drivers/{driver_id}/phone/verify")
+def verify_driver_phone(driver_id: str, body: PhoneVerifyCodeRequest, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Driver '{driver_id}' not found.")
+
+        vrf_row = conn.execute(
+            "SELECT * FROM phone_verifications WHERE verification_id = ? AND driver_id = ?",
+            (body.verification_id, driver_id),
+        ).fetchone()
+
+        if not vrf_row:
+            raise AppError(404, "NOT_FOUND", f"Verification challenge '{body.verification_id}' not found.")
+
+        vrf = dict(vrf_row)
+        if vrf["status"] != "pending":
+            raise AppError(400, "CHALLENGE_INACTIVE", f"Verification challenge is already '{vrf['status']}'.")
+
+        if vrf["attempts_remaining"] <= 0:
+            conn.execute("UPDATE phone_verifications SET status = 'failed' WHERE verification_id = ?", (body.verification_id,))
+            raise AppError(400, "MAX_ATTEMPTS_EXCEEDED", "Maximum verification attempts exceeded. Please request a new code.")
+
+        try:
+            exp_time = datetime.fromisoformat(vrf["expires_at"].replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) > exp_time:
+                conn.execute("UPDATE phone_verifications SET status = 'expired' WHERE verification_id = ?", (body.verification_id,))
+                raise AppError(400, "CHALLENGE_EXPIRED", "Verification code has expired. Please request a new code.")
+        except ValueError:
+            pass
+
+        expected_hash = hashlib.sha256((body.code.strip() + driver_id).encode()).hexdigest()
+        if hmac.compare_digest(expected_hash, vrf["code_hash"]):
+            conn.execute("UPDATE phone_verifications SET status = 'verified' WHERE verification_id = ?", (body.verification_id,))
+            conn.execute("UPDATE drivers SET phone_verification_status = 'verified' WHERE driver_id = ?", (driver_id,))
+            result = {
+                "status": "verified",
+                "driver_id": driver_id,
+                "phone_e164": vrf["phone_e164"],
+                "message": "Phone number successfully verified.",
+            }
+            write_audit(conn, actor=actor, action="verify_phone_success", entity="driver", entity_id=driver_id, after=result)
+            broadcast_event("driver_phone_verified", {"driver_id": driver_id, "status": "verified"})
+            return result
+        else:
+            new_attempts = vrf["attempts_remaining"] - 1
+            new_status = "failed" if new_attempts <= 0 else "pending"
+            conn.execute(
+                "UPDATE phone_verifications SET attempts_remaining = ?, status = ? WHERE verification_id = ?",
+                (new_attempts, new_status, body.verification_id),
+            )
+            if new_attempts <= 0:
+                conn.execute("UPDATE drivers SET phone_verification_status = 'failed' WHERE driver_id = ?", (driver_id,))
+                raise AppError(400, "INVALID_CODE", "Invalid code. Max attempts exceeded. Please request a new code.")
+            raise AppError(400, "INVALID_CODE", f"Incorrect verification code. {new_attempts} attempts remaining.")
 
 
 # -------------------------------------------------------------------------
@@ -1391,6 +1559,203 @@ def get_routes():
 
 
 # -------------------------------------------------------------------------
+# AUTHENTICATED DEVICE INVENTORY & MANAGEMENT (PHASE 2)
+# -------------------------------------------------------------------------
+@app.post("/devices/register", status_code=201)
+def register_device(body: DeviceRegisterRequest, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    with immediate_transaction() as conn:
+        drv = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (body.driver_id,)).fetchone()
+        if not drv:
+            raise AppError(404, "NOT_FOUND", f"Driver '{body.driver_id}' not found.")
+
+        device_id = f"DEV-{uuid.uuid4().hex[:8].upper()}"
+        now_str = utc_now_iso()
+        caps_str = json.dumps(body.capabilities or {})
+
+        conn.execute(
+            """
+            INSERT INTO devices (
+                device_id, driver_id, nickname, os_family, browser_family,
+                platform, screen_res, capabilities_json, permission_status,
+                last_ip, registered_at, last_seen_at, is_revoked
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            """,
+            (
+                device_id,
+                body.driver_id,
+                body.nickname,
+                body.os_family,
+                body.browser_family,
+                body.platform,
+                body.screen_res,
+                caps_str,
+                body.permission_status,
+                client_ip,
+                now_str,
+                now_str,
+            ),
+        )
+
+        device_profile = {
+            "device_id": device_id,
+            "driver_id": body.driver_id,
+            "driver_name": drv["name"],
+            "nickname": body.nickname,
+            "os_family": body.os_family,
+            "browser_family": body.browser_family,
+            "platform": body.platform,
+            "screen_res": body.screen_res,
+            "capabilities": body.capabilities or {},
+            "permission_status": body.permission_status,
+            "last_ip": client_ip,
+            "registered_at": now_str,
+            "last_seen_at": now_str,
+            "is_revoked": False,
+        }
+        write_audit(conn, actor=actor, action="register_device", entity="device", entity_id=device_id, after=device_profile)
+
+    broadcast_event("device_registered", device_profile)
+    return device_profile
+
+
+@app.get("/devices")
+def list_devices(
+    driver_id: Optional[str] = Query(None),
+    is_revoked: Optional[bool] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+):
+    with read_conn() as conn:
+        conditions = []
+        params = []
+        if driver_id:
+            conditions.append("d.driver_id = ?")
+            params.append(driver_id)
+        if is_revoked is not None:
+            conditions.append("d.is_revoked = ?")
+            params.append(1 if is_revoked else 0)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT d.*, dr.name as driver_name, dr.phone as driver_phone
+            FROM devices d
+            JOIN drivers dr ON dr.driver_id = d.driver_id
+            {where_clause}
+            ORDER BY d.last_seen_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        rows = conn.execute(query, tuple(params)).fetchall()
+
+        devices = []
+        for r in rows:
+            dev = dict(r)
+            dev["is_revoked"] = bool(dev["is_revoked"])
+            try:
+                dev["capabilities"] = json.loads(dev.get("capabilities_json") or "{}")
+            except Exception:
+                dev["capabilities"] = {}
+            devices.append(dev)
+        return devices
+
+
+@app.get("/devices/{device_id}")
+def get_device_details(device_id: str):
+    with read_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT d.*, dr.name as driver_name, dr.phone as driver_phone
+            FROM devices d
+            JOIN drivers dr ON dr.driver_id = d.driver_id
+            WHERE d.device_id = ?
+            """,
+            (device_id,),
+        ).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Device '{device_id}' not found.")
+
+        dev = dict(row)
+        dev["is_revoked"] = bool(dev["is_revoked"])
+        try:
+            dev["capabilities"] = json.loads(dev.get("capabilities_json") or "{}")
+        except Exception:
+            dev["capabilities"] = {}
+
+        sess = conn.execute(
+            "SELECT * FROM tracking_sessions WHERE device_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1",
+            (device_id,),
+        ).fetchone()
+        dev["active_session"] = dict(sess) if sess else None
+
+        last_fix = conn.execute(
+            "SELECT * FROM gps_locations WHERE device_id = ? ORDER BY server_timestamp DESC, rowid DESC LIMIT 1",
+            (device_id,),
+        ).fetchone()
+        dev["latest_location"] = dict(last_fix) if last_fix else None
+        return dev
+
+
+@app.post("/devices/{device_id}/revoke")
+def revoke_device(device_id: str, body: DeviceRevokeRequest, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers")
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Device '{device_id}' not found.")
+
+        dev = dict(row)
+        if dev["is_revoked"]:
+            return {**dev, "is_revoked": True, "message": "Device is already revoked."}
+
+        now_str = utc_now_iso()
+        conn.execute(
+            "UPDATE devices SET is_revoked = 1, revoked_at = ? WHERE device_id = ?",
+            (now_str, device_id),
+        )
+
+        conn.execute(
+            "UPDATE tracking_sessions SET status = 'stopped', stopped_at = ? WHERE device_id = ? AND status = 'active'",
+            (now_str, device_id),
+        )
+
+        after_dev = {**dev, "is_revoked": True, "revoked_at": now_str, "revoke_reason": body.reason}
+        write_audit(conn, actor=actor, action="revoke_device", entity="device", entity_id=device_id, before=dev, after=after_dev)
+
+    broadcast_event("device_revoked", after_dev)
+    return after_dev
+
+
+@app.get("/devices/{device_id}/telemetry")
+def get_device_telemetry(device_id: str, limit: int = Query(100, ge=1, le=500)):
+    with read_conn() as conn:
+        row = conn.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Device '{device_id}' not found.")
+
+        fixes = conn.execute(
+            """
+            SELECT location_id, session_id, latitude, longitude, accuracy, speed, derived_speed, heading,
+                   quality_flag, is_implausible_jump, device_timestamp, server_timestamp
+            FROM gps_locations
+            WHERE device_id = ?
+            ORDER BY server_timestamp DESC, rowid DESC
+            LIMIT ?
+            """,
+            (device_id, limit),
+        ).fetchall()
+        return [dict(f) for f in fixes]
+
+
+# -------------------------------------------------------------------------
 # REAL PHONE GPS TRACKING, VEHICLE & DELIVERY TELEMETRY & STREET VIEW
 # -------------------------------------------------------------------------
 def make_street_view_url(lat: Optional[float], lng: Optional[float]) -> Optional[str]:
@@ -1409,6 +1774,16 @@ def start_tracking_session(body: TrackingSessionStart, request: Request):
         drv_row = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (body.driver_id,)).fetchone()
         if not drv_row:
             raise AppError(404, "NOT_FOUND", f"Driver '{body.driver_id}' not found.")
+
+        # Check device authorization if device_id provided
+        if body.device_id:
+            dev_row = conn.execute("SELECT * FROM devices WHERE device_id = ?", (body.device_id,)).fetchone()
+            if not dev_row:
+                raise AppError(404, "NOT_FOUND", f"Device '{body.device_id}' not found.")
+            if dev_row["is_revoked"]:
+                raise AppError(403, "DEVICE_REVOKED", f"Device '{body.device_id}' has been revoked.")
+            if dev_row["driver_id"] != body.driver_id:
+                raise AppError(403, "DEVICE_DRIVER_MISMATCH", f"Device '{body.device_id}' is registered to another driver.")
 
         # Check if driver is actively assigned to any delivery/vehicle
         asg_row = conn.execute(
@@ -1434,15 +1809,16 @@ def start_tracking_session(body: TrackingSessionStart, request: Request):
         dev_info = body.device_info or "Mobile Browser Geolocation"
         conn.execute(
             """
-            INSERT INTO tracking_sessions (session_id, driver_id, vehicle_id, delivery_id, device_info, started_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'active')
+            INSERT INTO tracking_sessions (session_id, driver_id, device_id, vehicle_id, delivery_id, device_info, started_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
             """,
-            (session_id, body.driver_id, vehicle_id, delivery_id, dev_info, now_str),
+            (session_id, body.driver_id, body.device_id, vehicle_id, delivery_id, dev_info, now_str),
         )
 
         session_data = {
             "session_id": session_id,
             "driver_id": body.driver_id,
+            "device_id": body.device_id,
             "driver_name": drv_row["name"],
             "driver_phone": drv_row["phone"],
             "vehicle_id": vehicle_id,
@@ -1491,10 +1867,42 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             raise AppError(404, "NOT_FOUND", f"Tracking session '{body.session_id}' not found.")
         session = dict(sess_row)
 
+        # Check device revocation if linked
+        device_id = body.device_id or session.get("device_id")
+        if device_id:
+            dev_row = conn.execute("SELECT is_revoked FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+            if dev_row and dev_row["is_revoked"]:
+                raise AppError(403, "DEVICE_REVOKED", "The device associated with this tracking session has been revoked.")
+
         if session["status"] != "active":
             raise AppError(400, "SESSION_INACTIVE", f"Tracking session '{body.session_id}' is currently '{session['status']}'.")
 
         driver_id = session["driver_id"]
+
+        # Anti-flooding rate limit (minimum 0.8s between fixes per session)
+        last_fix = conn.execute(
+            """
+            SELECT latitude, longitude, speed, server_timestamp, device_timestamp
+            FROM gps_locations
+            WHERE session_id = ?
+            ORDER BY server_timestamp DESC, rowid DESC
+            LIMIT 1
+            """,
+            (body.session_id,),
+        ).fetchone()
+
+        now_str = utc_now_iso()
+        if last_fix:
+            try:
+                prev_dev_ts = datetime.fromisoformat(last_fix["device_timestamp"].replace("Z", "+00:00"))
+                curr_dev_ts = datetime.fromisoformat(body.device_timestamp.replace("Z", "+00:00"))
+                delta_dev_s = (curr_dev_ts - prev_dev_ts).total_seconds()
+                if delta_dev_s < 0.8:
+                    raise AppError(429, "RATE_LIMITED", "GPS update throttled: minimum interval between fixes is 1 second.")
+            except ValueError:
+                pass
+            except ValueError:
+                pass
 
         # Re-verify active vehicle & delivery assignment
         asg_row = conn.execute(
@@ -1505,22 +1913,49 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         vehicle_id = asg_row["vehicle_id"] if asg_row else session.get("vehicle_id")
         delivery_id = asg_row["delivery_id"] if asg_row else session.get("delivery_id")
 
-        now_str = utc_now_iso()
+        # Evaluate step kinematics and jump detection
+        if last_fix:
+            prev_fix = dict(last_fix)
+            prev_ts = prev_fix["device_timestamp"] if prev_fix.get("device_timestamp") else prev_fix["server_timestamp"]
+            curr_ts = body.device_timestamp if body.device_timestamp else now_str
+            kin = evaluate_telemetry_step(
+                prev_fix["latitude"],
+                prev_fix["longitude"],
+                prev_ts,
+                body.latitude,
+                body.longitude,
+                curr_ts,
+                body.speed,
+            )
+        else:
+            kin = {
+                "distance_m": 0.0,
+                "time_delta_s": 0.0,
+                "derived_speed_mps": None,
+                "derived_speed_kmh": None,
+                "is_implausible_jump": 0,
+                "quality_flag": "accepted",
+            }
+
+        client_ip = request.client.host if request.client else "127.0.0.1"
         loc_id = f"LOC-{uuid.uuid4().hex[:10].upper()}"
+        speed_source = "reported" if body.speed is not None else ("derived" if kin["derived_speed_mps"] is not None else "none")
 
         conn.execute(
             """
             INSERT INTO gps_locations (
-                location_id, session_id, driver_id, vehicle_id, delivery_id,
-                latitude, longitude, accuracy, speed, heading,
-                device_timestamp, server_timestamp, is_valid
+                location_id, session_id, driver_id, device_id, vehicle_id, delivery_id,
+                latitude, longitude, accuracy, speed, heading, derived_speed, speed_source,
+                distance_from_prev_m, time_delta_prev_s, is_implausible_jump, quality_flag,
+                client_ip, device_timestamp, server_timestamp, is_valid
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 loc_id,
                 body.session_id,
                 driver_id,
+                device_id,
                 vehicle_id,
                 delivery_id,
                 body.latitude,
@@ -1528,22 +1963,48 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
                 body.accuracy,
                 body.speed,
                 body.heading,
+                kin["derived_speed_mps"],
+                speed_source,
+                kin["distance_m"],
+                kin["time_delta_s"],
+                kin["is_implausible_jump"],
+                kin["quality_flag"],
+                client_ip,
                 body.device_timestamp,
                 now_str,
             ),
         )
 
+        # Update session ping & fix count
+        conn.execute(
+            "UPDATE tracking_sessions SET last_ping_at = ?, fix_count = fix_count + 1 WHERE session_id = ?",
+            (now_str, body.session_id),
+        )
+
+        # Update device last seen
+        if device_id:
+            conn.execute(
+                "UPDATE devices SET last_seen_at = ?, last_ip = ? WHERE device_id = ?",
+                (now_str, client_ip, device_id),
+            )
+
         record = {
             "location_id": loc_id,
             "session_id": body.session_id,
             "driver_id": driver_id,
+            "device_id": device_id,
             "vehicle_id": vehicle_id,
             "delivery_id": delivery_id,
             "latitude": body.latitude,
             "longitude": body.longitude,
             "accuracy": body.accuracy,
             "speed": body.speed,
+            "derived_speed_kmh": kin["derived_speed_kmh"],
+            "speed_source": speed_source,
             "heading": body.heading,
+            "distance_from_prev_m": kin["distance_m"],
+            "is_implausible_jump": bool(kin["is_implausible_jump"]),
+            "quality_flag": kin["quality_flag"],
             "device_timestamp": body.device_timestamp,
             "server_timestamp": now_str,
             "is_valid": True,
@@ -1582,21 +2043,18 @@ def get_driver_latest_location(driver_id: str):
             }
 
         rec = dict(row)
-        try:
-            fix_time = datetime.fromisoformat(rec["server_timestamp"].replace("Z", "+00:00"))
-            age_sec = (datetime.now(timezone.utc) - fix_time).total_seconds()
-            is_stale = age_sec > 90
-        except Exception:
-            is_stale = False
-            age_sec = 0
-
+        freshness = compute_freshness_status(rec["server_timestamp"])
         rec["has_gps"] = True
-        rec["is_stale"] = is_stale
-        rec["age_seconds"] = round(age_sec, 1)
-        rec["tracking_status"] = "stale" if is_stale else "live"
+        rec["is_stale"] = freshness["is_stale"]
+        rec["is_live"] = freshness["is_live"]
+        rec["is_offline"] = freshness["is_offline"]
+        rec["age_seconds"] = freshness["age_seconds"]
+        rec["tracking_status"] = freshness["tracking_status"]
         rec["street_view_url"] = make_street_view_url(rec["latitude"], rec["longitude"])
         rec["driver_name"] = drv["name"]
         rec["driver_phone"] = drv["phone"]
+        rec["phone_e164"] = drv["phone_e164"]
+        rec["phone_verification_status"] = drv["phone_verification_status"]
         return rec
 
 
@@ -1651,22 +2109,28 @@ def get_vehicle_latest_location(vehicle_id: str):
             }
 
         rec = dict(row)
-        try:
-            fix_time = datetime.fromisoformat(rec["server_timestamp"].replace("Z", "+00:00"))
-            age_sec = (datetime.now(timezone.utc) - fix_time).total_seconds()
-            is_stale = age_sec > 90
-        except Exception:
-            is_stale = False
-            age_sec = 0
-
+        freshness = compute_freshness_status(rec["server_timestamp"])
         rec["has_gps"] = True
-        rec["is_stale"] = is_stale
-        rec["age_seconds"] = round(age_sec, 1)
-        rec["tracking_status"] = "stale" if is_stale else "live"
+        rec["is_stale"] = freshness["is_stale"]
+        rec["is_live"] = freshness["is_live"]
+        rec["is_offline"] = freshness["is_offline"]
+        rec["age_seconds"] = freshness["age_seconds"]
+        rec["tracking_status"] = freshness["tracking_status"]
         rec["registration_no"] = veh["registration_no"]
         rec["vehicle_type"] = veh["type"]
         rec["capacity"] = veh["capacity"]
         rec["assigned_driver"] = dict(asg) if asg else None
+
+        # Fetch assigned device if driver has one
+        if asg:
+            dev = conn.execute(
+                "SELECT device_id, nickname, os_family, browser_family, platform, last_seen_at, is_revoked FROM devices WHERE driver_id = ? ORDER BY last_seen_at DESC LIMIT 1",
+                (asg["driver_id"],),
+            ).fetchone()
+            rec["assigned_device"] = dict(dev) if dev else None
+        else:
+            rec["assigned_device"] = None
+
         rec["street_view_url"] = make_street_view_url(rec["latitude"], rec["longitude"])
         return rec
 
@@ -1726,18 +2190,13 @@ def get_delivery_latest_location(delivery_id: str):
             return resp
 
         rec = dict(row)
-        try:
-            fix_time = datetime.fromisoformat(rec["server_timestamp"].replace("Z", "+00:00"))
-            age_sec = (datetime.now(timezone.utc) - fix_time).total_seconds()
-            is_stale = age_sec > 90
-        except Exception:
-            is_stale = False
-            age_sec = 0
-
+        freshness = compute_freshness_status(rec["server_timestamp"])
         rec["has_gps"] = True
-        rec["is_stale"] = is_stale
-        rec["age_seconds"] = round(age_sec, 1)
-        rec["tracking_status"] = "stale" if is_stale else "live"
+        rec["is_stale"] = freshness["is_stale"]
+        rec["is_live"] = freshness["is_live"]
+        rec["is_offline"] = freshness["is_offline"]
+        rec["age_seconds"] = freshness["age_seconds"]
+        rec["tracking_status"] = freshness["tracking_status"]
         rec["current_street_view"] = make_street_view_url(rec["latitude"], rec["longitude"])
         resp["latest_location"] = rec
         resp["has_gps"] = True
@@ -1864,8 +2323,10 @@ def get_telemetry_graph(
 
     return {
         "data_points": points,
+        "points": points,
         "total_distance_km": round(total_dist_km, 3),
         "point_count": len(points),
+        "points_count": len(points),
         "max_speed_kmh": max([p["speed_kmh"] for p in points], default=0.0),
         "avg_accuracy_m": round(sum([p["accuracy_m"] for p in points]) / len(points), 1) if points else 0.0,
     }

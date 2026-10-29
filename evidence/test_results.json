@@ -1,5 +1,251 @@
 [
   {
+    "test_id": "GPS-1",
+    "name": "Driver Phone Update & International E.164 Validation",
+    "input": {
+      "endpoint": "PATCH /drivers/{id}/phone",
+      "phone": "+91-9876543210"
+    },
+    "expected": {
+      "status_code": 200,
+      "phone_e164": "+919876543210"
+    },
+    "observed": {
+      "status_code": 200,
+      "phone_e164": "+919876543210"
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_tracking.py::test_driver_phone_update_and_validation"
+  },
+  {
+    "test_id": "GPS-2",
+    "name": "Tracking Session Lifecycle & GPS Ingestion",
+    "input": {
+      "endpoint": "POST /tracking/sessions/start & /tracking/location"
+    },
+    "expected": {
+      "status_code": 201,
+      "quality_flag": "accepted"
+    },
+    "observed": {
+      "status_code": 201,
+      "quality_flag": "accepted"
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_tracking.py::test_tracking_session_lifecycle_and_gps_ingestion"
+  },
+  {
+    "test_id": "GPS-3",
+    "name": "GPS Coordinate Boundaries & Anti-Spoofing Validation",
+    "input": {
+      "endpoint": "POST /tracking/location",
+      "latitude": 95.0,
+      "longitude": 185.0
+    },
+    "expected": {
+      "status_code": 400,
+      "error": "VALIDATION_ERROR"
+    },
+    "observed": {
+      "status_code": 400,
+      "error": "VALIDATION_ERROR"
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_tracking.py::test_gps_coordinate_boundaries_and_empty_states"
+  },
+  {
+    "test_id": "DEV-1",
+    "name": "Device Registration, Listing & Platform Capability Capture",
+    "input": {
+      "endpoint": "POST /devices/register",
+      "driver_id": "DR-DEV-01",
+      "nickname": "Test Phone"
+    },
+    "expected": {
+      "status_code": 201,
+      "is_revoked": 0
+    },
+    "observed": {
+      "status_code": 201,
+      "is_revoked": 0
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_devices.py::test_device_registration_and_listing"
+  },
+  {
+    "test_id": "DEV-2",
+    "name": "Device Revocation & Ingestion Authorization 403 Guards",
+    "input": {
+      "endpoint": "POST /devices/{id}/revoke & POST /tracking/location"
+    },
+    "expected": {
+      "revoke_status": 200,
+      "blocked_loc_status": 403,
+      "error": "DEVICE_REVOKED"
+    },
+    "observed": {
+      "revoke_status": 200,
+      "blocked_loc_status": 403,
+      "error": "DEVICE_REVOKED"
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_devices.py::test_device_revocation_and_authorization_guards"
+  },
+  {
+    "test_id": "DEV-3",
+    "name": "Device Negative Cases (404 Not Found & Missing Device)",
+    "input": {
+      "endpoint": "GET /devices/DEV-NONEXISTENT"
+    },
+    "expected": {
+      "status_code": 404,
+      "error": "NOT_FOUND"
+    },
+    "observed": {
+      "status_code": 404,
+      "error": "NOT_FOUND"
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_devices.py::test_device_negative_cases"
+  },
+  {
+    "test_id": "PHONE-1",
+    "name": "Phone E.164 Normalization, Carrier & Country Metadata Parsing",
+    "input": {
+      "raw_phone": "+91 98765 43210"
+    },
+    "expected": {
+      "phone_e164": "+919876543210",
+      "country_code": "IN"
+    },
+    "observed": {
+      "phone_e164": "+919876543210",
+      "country_code": "IN"
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_phone_verification.py::test_phone_e164_normalization_and_metadata"
+  },
+  {
+    "test_id": "PHONE-2",
+    "name": "Phone Verification Challenge, SHA-256 OTP Hash & Attempt Guards",
+    "input": {
+      "endpoint": "POST /drivers/{id}/phone/request-verification & /verify"
+    },
+    "expected": {
+      "status_code": 200,
+      "phone_verification_status": "verified"
+    },
+    "observed": {
+      "status_code": 200,
+      "phone_verification_status": "verified"
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_phone_verification.py::test_phone_verification_challenge_flow"
+  },
+  {
+    "test_id": "MATH-1",
+    "name": "Haversine Distance Surface Precision & Boundary Clamping",
+    "input": {
+      "blr": [
+        12.9716,
+        77.5946
+      ],
+      "del": [
+        28.6139,
+        77.209
+      ]
+    },
+    "expected": {
+      "distance_km_range": [
+        1730,
+        1750
+      ]
+    },
+    "observed": {
+      "distance_km_range": [
+        1730,
+        1750
+      ]
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_telemetry_formulas.py::test_haversine_distance_mathematical_precision"
+  },
+  {
+    "test_id": "MATH-2",
+    "name": "Telemetry Step Kinematics & Implausible Jump Flagging (>180 km/h)",
+    "input": {
+      "step1": "normal driving (12.5 m/s)",
+      "step2": "teleportation jump (1000m in 1s)"
+    },
+    "expected": {
+      "step1_flag": "accepted",
+      "step2_flag": "flagged_jump",
+      "is_jump": 1
+    },
+    "observed": {
+      "step1_flag": "accepted",
+      "step2_flag": "flagged_jump",
+      "is_jump": 1
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_telemetry_formulas.py::test_telemetry_step_kinematics_and_jump_detection"
+  },
+  {
+    "test_id": "MATH-3",
+    "name": "Telemetry Freshness Age Thresholds (Live <=90s, Stale <=300s, Offline)",
+    "input": {
+      "ages": [
+        10,
+        150,
+        600
+      ]
+    },
+    "expected": {
+      "statuses": [
+        "live",
+        "stale",
+        "offline"
+      ]
+    },
+    "observed": {
+      "statuses": [
+        "live",
+        "stale",
+        "offline"
+      ]
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_telemetry_formulas.py::test_freshness_status_thresholds"
+  },
+  {
+    "test_id": "MATH-4",
+    "name": "GPS Rate Limiting (0.8s Throttle) & Dual-Aliased Telemetry Graph Keys",
+    "input": {
+      "rapid_fix_interval": "< 0.8s",
+      "graph_endpoint": "/tracking/telemetry-graph"
+    },
+    "expected": {
+      "rapid_status": 429,
+      "keys_present": [
+        "data_points",
+        "points",
+        "point_count",
+        "points_count"
+      ]
+    },
+    "observed": {
+      "rapid_status": 429,
+      "keys_present": [
+        "data_points",
+        "points",
+        "point_count",
+        "points_count"
+      ]
+    },
+    "status": "PASS",
+    "evidence_path": "tests/test_telemetry_formulas.py::test_gps_ingestion_rate_limiting_and_dual_aliased_telemetry"
+  },
+  {
     "test_id": "AUDIT-1",
     "name": "Clean Start & Health",
     "input": {

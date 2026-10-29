@@ -158,6 +158,7 @@ class DriverPhonePatch(BaseModel):
 
 class TrackingSessionStart(BaseModel):
     driver_id: str = Field(..., min_length=1, max_length=50)
+    device_id: Optional[str] = Field(default=None, max_length=50)
     device_info: Optional[str] = Field(default=None, max_length=255)
 
 
@@ -167,6 +168,7 @@ class TrackingSessionStop(BaseModel):
 
 class GPSLocationCreate(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=50)
+    device_id: Optional[str] = Field(default=None, max_length=50)
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     accuracy: float = Field(..., ge=0.0)
@@ -178,3 +180,35 @@ class GPSLocationCreate(BaseModel):
     @classmethod
     def check_ts(cls, v: str) -> str:
         return validate_iso8601(v)
+
+
+class DeviceRegisterRequest(BaseModel):
+    driver_id: str = Field(..., min_length=1, max_length=50)
+    nickname: str = Field(..., min_length=1, max_length=80)
+    os_family: Optional[str] = Field(default=None, max_length=50)
+    browser_family: Optional[str] = Field(default=None, max_length=50)
+    platform: Optional[str] = Field(default=None, max_length=50)
+    screen_res: Optional[str] = Field(default=None, max_length=30)
+    capabilities: Optional[dict] = None
+    permission_status: Literal["granted", "prompt", "denied"] = "prompt"
+
+    @field_validator("nickname")
+    @classmethod
+    def strip_nickname(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("nickname cannot be empty")
+        return s
+
+
+class DeviceRevokeRequest(BaseModel):
+    reason: Optional[str] = Field(default="Revoked by operator", max_length=200)
+
+
+class PhoneVerificationRequest(BaseModel):
+    driver_id: str = Field(..., min_length=1, max_length=50)
+
+
+class PhoneVerifyCodeRequest(BaseModel):
+    verification_id: str = Field(..., min_length=1, max_length=50)
+    code: str = Field(..., min_length=4, max_length=10)

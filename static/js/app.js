@@ -18,6 +18,7 @@ const STATE = {
   },
   vehicles: [],
   drivers: [],
+  devices: [],
   deliveries: [],
   filteredDeliveries: [],
   audit: [],
@@ -84,6 +85,10 @@ const VIEW_META = {
   'delivery-tracking': {
     title: 'Delivery Transit Tracking',
     subtitle: 'Corridor monitoring, planned route vs real driver GPS trail, and street-level vantage',
+  },
+    devices: {
+    title: 'Authenticated Device Inventory',
+    subtitle: 'Manage registered smartphone devices, browser sessions, capability flags, and revocation guards',
   },
   'driver-gps': {
     title: 'Driver Phone GPS Portal',
@@ -202,12 +207,13 @@ async function apiRequest(path, options = {}) {
 /* ==================== DATA SYNC ==================== */
 async function refreshAllData(silent = false) {
   try {
-    const [metricsRes, vehiclesRes, driversRes, deliveriesRes, auditRes] = await Promise.allSettled([
+    const [metricsRes, vehiclesRes, driversRes, deliveriesRes, auditRes, devicesRes] = await Promise.allSettled([
       apiRequest('/metrics'),
       apiRequest('/vehicles'),
       apiRequest('/drivers'),
       apiRequest('/deliveries'),
       apiRequest('/audit'),
+      apiRequest('/devices'),
     ]);
 
     if (metricsRes.status === 'fulfilled' && metricsRes.value) {
@@ -224,6 +230,11 @@ async function refreshAllData(silent = false) {
     }
     if (auditRes.status === 'fulfilled' && Array.isArray(auditRes.value)) {
       STATE.audit = auditRes.value;
+    }
+    if (devicesRes && devicesRes.status === 'fulfilled' && Array.isArray(devicesRes.value)) {
+      STATE.devices = devicesRes.value;
+      const devBadge = document.getElementById('nav-badge-devices');
+      if (devBadge) devBadge.textContent = String(STATE.devices.length);
     }
 
     await refreshFilteredDeliveries();
@@ -799,10 +810,24 @@ function renderDriversTable() {
           <td class="mono"><strong>${escapeHtml(d.driver_id)}</strong></td>
           <td>${escapeHtml(d.name)}</td>
           <td class="mono">
-            <span>${escapeHtml(d.phone)}</span>
-            <button type="button" class="btn btn-ghost btn-xs ml-xs" data-edit-phone="${escapeHtml(d.driver_id)}" title="Update Phone for Live GPS Testing" style="padding:1px 5px; font-size:11px; margin-left:6px;">
-              ${icon('edit', 10)}
-            </button>
+            <div>
+              <span>${escapeHtml(d.phone_e164 || d.phone)}</span>
+              <button type="button" class="btn btn-ghost btn-xs ml-xs" data-edit-phone="${escapeHtml(d.driver_id)}" title="Update Phone Number" style="padding:1px 5px; font-size:11px; margin-left:4px;">
+                ${icon('edit', 10)}
+              </button>
+            </div>
+            <div class="mt-xs" style="display:flex; align-items:center; gap:4px; margin-top:3px;">
+              ${
+                d.phone_verification_status === 'verified'
+                  ? '<span class="badge badge-success" style="font-size:9px; padding:1px 4px;">VERIFIED</span>'
+                  : d.phone_verification_status === 'pending'
+                  ? '<span class="badge badge-warning" style="font-size:9px; padding:1px 4px;">CHALLENGE PENDING</span>'
+                  : '<span class="badge badge-neutral" style="font-size:9px; padding:1px 4px;">UNVERIFIED</span>'
+              }
+              <button type="button" class="btn btn-ghost btn-xs" data-verify-phone="${escapeHtml(d.driver_id)}" style="font-size:10px; padding:0 4px;" title="Challenge OTP">
+                Verify
+              </button>
+            </div>
           </td>
           <td>${statusBadgeHtml(d.availability_status)}</td>
           <td>${activeDel}</td>
@@ -879,6 +904,8 @@ function switchView(viewName) {
     renderDeliveryTracking();
   } else if (viewName === 'driver-gps') {
     renderDriverGpsPortal();
+  } else if (viewName === 'devices') {
+    renderDevicesTable();
   }
 }
 
@@ -1037,6 +1064,196 @@ function downloadErrorReportCsv() {
   a.download = `${STATE.importEntity}_import_errors.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+
+/* ==================== DEVICE INVENTORY & PHONE VERIFICATION ==================== */
+function renderDevicesTable() {
+  const tbody = document.getElementById('devices-tbody');
+  if (!tbody) return;
+  if (!STATE.devices || STATE.devices.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9" class="empty-cell">
+          <div>No devices registered yet.</div>
+          <div style="margin-top:8px;">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-empty-register-dev">
+              ${icon('plus', 14)}<span>Register Test Smartphone Device</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+    const btn = document.getElementById('btn-empty-register-dev');
+    if (btn) btn.addEventListener('click', openRegisterDeviceModal);
+    return;
+  }
+
+  tbody.innerHTML = STATE.devices
+    .map((dev) => {
+      const isRevoked = dev.is_revoked === 1 || dev.is_revoked === true;
+      const statusBadge = isRevoked
+        ? '<span class="badge badge-danger">REVOKED</span>'
+        : '<span class="badge badge-success">ACTIVE</span>';
+
+      const permBadge =
+        dev.permission_status === 'granted'
+          ? '<span class="badge badge-success">GRANTED</span>'
+          : `<span class="badge badge-warning">${escapeHtml(dev.permission_status || 'prompt')}</span>`;
+
+      const driverName = dev.driver_name
+        ? `${escapeHtml(dev.driver_name)} (${escapeHtml(dev.driver_id)})`
+        : escapeHtml(dev.driver_id || 'Unassigned');
+
+      const lastSeen = dev.last_seen_at
+        ? `<span class="mono" style="font-size:12px;">${escapeHtml(dev.last_seen_at.replace('T', ' ').slice(0, 19))}</span>`
+        : '<span class="kpi-sub">Never</span>';
+
+      const actions = isRevoked
+        ? '<span class="kpi-sub" style="font-size:12px;">Revoked</span>'
+        : `<button type="button" class="btn btn-ghost btn-xs text-danger" data-revoke-device="${escapeHtml(dev.device_id)}">Revoke Device</button>`;
+
+      return `
+      <tr style="${isRevoked ? 'opacity:0.6;' : ''}">
+        <td class="mono font-bold">${escapeHtml(dev.device_id)}</td>
+        <td>${driverName}</td>
+        <td><strong>${escapeHtml(dev.nickname)}</strong></td>
+        <td><span class="mono" style="font-size:12px;">${escapeHtml(dev.os_family || 'Generic')} / ${escapeHtml(dev.browser_family || 'Browser')}</span></td>
+        <td>${permBadge}</td>
+        <td class="mono" style="font-size:12px;">${escapeHtml(dev.last_ip || '127.0.0.1')}</td>
+        <td>${lastSeen}</td>
+        <td>${statusBadge}</td>
+        <td class="text-right">${actions}</td>
+      </tr>
+    `;
+    })
+    .join('');
+}
+
+function openRegisterDeviceModal() {
+  const sel = document.getElementById('dev-reg-driver');
+  if (sel) {
+    sel.innerHTML = '<option value="">-- Select Driver --</option>' + 
+      STATE.drivers.map(d => `<option value="${escapeHtml(d.driver_id)}">${escapeHtml(d.name)} (${escapeHtml(d.driver_id)})</option>`).join('');
+  }
+  const ua = navigator.userAgent;
+  let os = 'Unknown OS';
+  if (/iPad|iPhone|iPod/.test(ua)) os = 'iOS';
+  else if (/Android/.test(ua)) os = 'Android';
+  else if (/Windows/.test(ua)) os = 'Windows';
+  else if (/Mac OS/.test(ua)) os = 'macOS';
+  else if (/Linux/.test(ua)) os = 'Linux';
+
+  let browser = 'Browser';
+  if (/Chrome/.test(ua) && !/Edg/.test(ua)) browser = 'Chrome';
+  else if (/Safari/.test(ua) && !/Chrome/.test(ua)) browser = 'Safari';
+  else if (/Firefox/.test(ua)) browser = 'Firefox';
+  else if (/Edg/.test(ua)) browser = 'Edge';
+
+  const osInput = document.getElementById('dev-reg-os');
+  const browserInput = document.getElementById('dev-reg-browser');
+  if (osInput && !osInput.value) osInput.value = os;
+  if (browserInput && !browserInput.value) browserInput.value = browser;
+
+  openModal('modal-device-register');
+}
+
+async function submitRegisterDevice(e) {
+  e.preventDefault();
+  const driver_id = document.getElementById('dev-reg-driver').value;
+  const nickname = document.getElementById('dev-reg-nickname').value.trim();
+  const os_family = document.getElementById('dev-reg-os').value.trim() || undefined;
+  const browser_family = document.getElementById('dev-reg-browser').value.trim() || undefined;
+
+  try {
+    const res = await apiRequest('/devices/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        driver_id,
+        nickname,
+        os_family,
+        browser_family,
+        platform: navigator.platform || 'Unknown',
+        screen_res: `${window.screen.width}x${window.screen.height}`,
+        permission_status: 'prompt',
+      }),
+    });
+    showToast(`Device registered: ${res.device_id}`, 'success');
+    closeModal('modal-device-register');
+    document.getElementById('form-device-register').reset();
+    await refreshAllData();
+    renderDevicesTable();
+  } catch (err) {
+    showToast(err.message || 'Failed to register device', 'error');
+  }
+}
+
+async function revokeDevice(deviceId) {
+  if (!confirm(`Are you sure you want to revoke device ${deviceId}? This device will be permanently blocked from submitting GPS telemetry.`)) {
+    return;
+  }
+  try {
+    await apiRequest(`/devices/${encodeURIComponent(deviceId)}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'Operator manual revocation from Device Inventory' }),
+    });
+    showToast(`Device ${deviceId} revoked`, 'success');
+    await refreshAllData();
+    renderDevicesTable();
+  } catch (err) {
+    showToast(err.message || 'Failed to revoke device', 'error');
+  }
+}
+
+async function openPhoneVerificationModal(driverId) {
+  const driver = STATE.drivers.find(d => d.driver_id === driverId);
+  if (!driver) {
+    showToast('Driver not found', 'error');
+    return;
+  }
+  try {
+    const challenge = await apiRequest(`/drivers/${encodeURIComponent(driverId)}/phone/request-verification`, {
+      method: 'POST',
+    });
+    document.getElementById('verify-driver-id').value = driverId;
+    document.getElementById('verify-challenge-id').value = challenge.verification_id;
+    document.getElementById('verify-driver-name').textContent = `${driver.name} (${driver.driver_id})`;
+    document.getElementById('verify-phone-e164').textContent = challenge.phone_e164 || driver.phone_e164 || driver.phone;
+    
+    const codeDisplay = document.getElementById('verify-dev-code-display');
+    if (codeDisplay) {
+      if (challenge.dev_challenge_code) {
+        codeDisplay.textContent = `Dev OTP: ${challenge.dev_challenge_code}`;
+        document.getElementById('verify-code-input').value = challenge.dev_challenge_code;
+      } else {
+        codeDisplay.textContent = 'OTP sent via SMS gateway';
+      }
+    }
+    openModal('modal-phone-verify');
+  } catch (err) {
+    showToast(err.message || 'Failed to initiate phone verification challenge', 'error');
+  }
+}
+
+async function submitPhoneVerification(e) {
+  e.preventDefault();
+  const driverId = document.getElementById('verify-driver-id').value;
+  const verification_id = document.getElementById('verify-challenge-id').value;
+  const code = document.getElementById('verify-code-input').value.trim();
+
+  try {
+    const res = await apiRequest(`/drivers/${encodeURIComponent(driverId)}/phone/verify`, {
+      method: 'POST',
+      body: JSON.stringify({ verification_id, code }),
+    });
+    showToast(res.message || 'Phone number successfully verified!', 'success');
+    closeModal('modal-phone-verify');
+    document.getElementById('form-phone-verify').reset();
+    await refreshAllData();
+    renderDriversTable();
+  } catch (err) {
+    showToast(err.message || 'Verification failed', 'error');
+  }
 }
 
 /* ==================== COMMAND PALETTE ==================== */
@@ -2544,6 +2761,16 @@ function setupEventListeners() {
       if (driverId) openEditDriverPhoneModal(driverId);
     }
   });
+
+  // Device Inventory listeners
+  document.getElementById('btn-open-register-device')?.addEventListener('click', openRegisterDeviceModal);
+  document.getElementById('btn-refresh-devices')?.addEventListener('click', async () => {
+    await refreshAllData();
+    renderDevicesTable();
+    showToast('Device Inventory refreshed');
+  });
+  document.getElementById('form-device-register')?.addEventListener('submit', submitRegisterDevice);
+  document.getElementById('form-phone-verify')?.addEventListener('submit', submitPhoneVerification);
 
   // Theme & Shortcuts
   document.getElementById('btn-theme-toggle')?.addEventListener('click', toggleTheme);

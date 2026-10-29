@@ -179,3 +179,4 @@ def test_gps_coordinate_boundaries_and_empty_states(client: TestClient, temp_db:
 
     # Nonexistent vehicle returns 404
     assert client.get("/tracking/vehicles/V-9999/latest").status_code == 404
+

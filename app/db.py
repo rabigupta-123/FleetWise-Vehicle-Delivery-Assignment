@@ -19,8 +19,42 @@ CREATE TABLE IF NOT EXISTS drivers (
     driver_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
+    phone_e164 TEXT NULL,
+    phone_verification_status TEXT NOT NULL DEFAULT 'unverified' CHECK (phone_verification_status IN ('unverified', 'pending', 'verified', 'failed')),
+    phone_carrier TEXT NULL,
+    phone_country_code TEXT NULL,
     availability_status TEXT NOT NULL DEFAULT 'available' CHECK (availability_status IN ('available', 'assigned', 'unavailable'))
 );
+
+CREATE TABLE IF NOT EXISTS devices (
+    device_id TEXT PRIMARY KEY,
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    nickname TEXT NOT NULL,
+    os_family TEXT NULL,
+    browser_family TEXT NULL,
+    platform TEXT NULL,
+    screen_res TEXT NULL,
+    capabilities_json TEXT NULL,
+    permission_status TEXT NOT NULL DEFAULT 'prompt',
+    last_ip TEXT NULL,
+    registered_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    revoked_at TEXT NULL,
+    is_revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_devices_driver ON devices(driver_id);
+
+CREATE TABLE IF NOT EXISTS phone_verifications (
+    verification_id TEXT PRIMARY KEY,
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    phone_e164 TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    attempts_remaining INTEGER NOT NULL DEFAULT 3,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'expired', 'failed')),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_phone_verifications_driver ON phone_verifications(driver_id);
 
 CREATE TABLE IF NOT EXISTS deliveries (
     delivery_id TEXT PRIMARY KEY,
@@ -77,11 +111,14 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS tracking_sessions (
     session_id TEXT PRIMARY KEY,
     driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    device_id TEXT NULL REFERENCES devices(device_id),
     vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id),
     delivery_id TEXT NULL REFERENCES deliveries(delivery_id),
     device_info TEXT NULL,
     started_at TEXT NOT NULL,
     stopped_at TEXT NULL,
+    last_ping_at TEXT NULL,
+    fix_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped', 'stale'))
 );
 
@@ -89,6 +126,7 @@ CREATE TABLE IF NOT EXISTS gps_locations (
     location_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES tracking_sessions(session_id),
     driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    device_id TEXT NULL REFERENCES devices(device_id),
     vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id),
     delivery_id TEXT NULL REFERENCES deliveries(delivery_id),
     latitude REAL NOT NULL CHECK (latitude >= -90.0 AND latitude <= 90.0),
@@ -96,6 +134,13 @@ CREATE TABLE IF NOT EXISTS gps_locations (
     accuracy REAL NOT NULL CHECK (accuracy >= 0),
     speed REAL NULL,
     heading REAL NULL,
+    derived_speed REAL NULL,
+    speed_source TEXT NOT NULL DEFAULT 'reported' CHECK (speed_source IN ('reported', 'derived', 'none')),
+    distance_from_prev_m REAL NULL,
+    time_delta_prev_s REAL NULL,
+    is_implausible_jump INTEGER NOT NULL DEFAULT 0,
+    quality_flag TEXT NOT NULL DEFAULT 'accepted' CHECK (quality_flag IN ('accepted', 'flagged_jump', 'low_accuracy', 'stale')),
+    client_ip TEXT NULL,
     device_timestamp TEXT NOT NULL,
     server_timestamp TEXT NOT NULL,
     is_valid INTEGER NOT NULL DEFAULT 1
@@ -135,8 +180,39 @@ def init_db(db_path: Optional[str] = None) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(SCHEMA_SQL)
+        # Migrate existing tables if columns are missing
+        _migrate_columns(conn)
     finally:
         conn.close()
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    def add_col_if_missing(table: str, col: str, col_type: str):
+        info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        existing_cols = {row["name"] for row in info}
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type};")
+
+    # Drivers
+    add_col_if_missing("drivers", "phone_e164", "TEXT NULL")
+    add_col_if_missing("drivers", "phone_verification_status", "TEXT NOT NULL DEFAULT 'unverified'")
+    add_col_if_missing("drivers", "phone_carrier", "TEXT NULL")
+    add_col_if_missing("drivers", "phone_country_code", "TEXT NULL")
+
+    # Tracking Sessions
+    add_col_if_missing("tracking_sessions", "device_id", "TEXT NULL")
+    add_col_if_missing("tracking_sessions", "last_ping_at", "TEXT NULL")
+    add_col_if_missing("tracking_sessions", "fix_count", "INTEGER NOT NULL DEFAULT 0")
+
+    # GPS Locations
+    add_col_if_missing("gps_locations", "device_id", "TEXT NULL")
+    add_col_if_missing("gps_locations", "derived_speed", "REAL NULL")
+    add_col_if_missing("gps_locations", "speed_source", "TEXT NOT NULL DEFAULT 'reported'")
+    add_col_if_missing("gps_locations", "distance_from_prev_m", "REAL NULL")
+    add_col_if_missing("gps_locations", "time_delta_prev_s", "REAL NULL")
+    add_col_if_missing("gps_locations", "is_implausible_jump", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("gps_locations", "quality_flag", "TEXT NOT NULL DEFAULT 'accepted'")
+    add_col_if_missing("gps_locations", "client_ip", "TEXT NULL")
 
 
 @contextmanager

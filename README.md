@@ -4,7 +4,7 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136.3-green.svg)](https://fastapi.tiangolo.com/)
 [![SQLite WAL](https://img.shields.io/badge/SQLite-WAL%20Mode-orange.svg)](https://www.sqlite.org/wal.html)
-[![Tests Passing](https://img.shields.io/badge/Tests-30%20Passed%20(100%25)-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/Tests-39%20Passed%20(100%25)-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 > **IT HAPPENS @ RAALE #13 (Logistics)**  
@@ -144,7 +144,14 @@ The application starts with an **empty database**. All records enter through:
 | `POST` | `/auth/logout` | Terminate session & clear cookies | `200` |
 | `GET` | `/import/templates/{entity}.csv` | Download header-only CSV template (`vehicles`, `drivers`, `deliveries`) | `200`, `404` |
 | `POST` | `/import/{entity}?dry_run=true\|false` | Validate & import CSV or JSON array (all-or-nothing atomic transaction) | `200`, `400` |
-| `PATCH` | `/drivers/{id}/phone` | Update driver phone number (used for live smartphone tracking authorization) | `200`, `400`, `404` |
+| `PATCH` | `/drivers/{id}/phone` | Update driver phone number (E.164 normalization & carrier/country parsing) | `200`, `400`, `404` |
+| `POST` | `/drivers/{id}/phone/request-verification` | Request 6-digit OTP challenge for driver phone (SHA-256 hashed, rate limited) | `200`, `400`, `429` |
+| `POST` | `/drivers/{id}/phone/verify` | Submit OTP verification code to confirm authenticated ownership | `200`, `400` |
+| `POST` | `/devices/register` | Register test smartphone / browser device session & capabilities | `201`, `400` |
+| `GET` | `/devices` | List registered devices with driver association and revocation status | `200` |
+| `GET` | `/devices/{device_id}` | Detailed device profile, active tracking session, and latest location | `200`, `404` |
+| `POST` | `/devices/{device_id}/revoke` | Revoke device authorization (blocks subsequent GPS fix ingestion) | `200`, `404` |
+| `GET` | `/devices/{device_id}/telemetry` | Time-series telemetry points for a specific authenticated device | `200`, `404` |
 | `POST` | `/tracking/sessions/start` | Start tracking session for a driver (links active vehicle & delivery assignment) | `201`, `400`, `404` |
 | `POST` | `/tracking/sessions/stop` | Stop active tracking session | `200`, `400`, `404` |
 | `POST` | `/tracking/location` | Ingest real device GPS fix (validates lat/lng, speed, accuracy, ISO timestamp) | `201`, `400` |
@@ -156,7 +163,45 @@ The application starts with an **empty database**. All records enter through:
 
 ---
 
-## 5. Real Smartphone GPS Tracking, Vehicle Tracking & Street View
+
+---
+
+## 5. Device Intelligence, Telematics Physics & Extensible Providers
+
+FleetWise implements transparent, verified telematics mathematics and strict device lifecycle authorization:
+
+### Mathematical Telematics Formulas (`app/telematics.py`)
+1. **Haversine Great-Circle Surface Distance:**
+   $$a = \sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1) \cdot \cos(\phi_2) \cdot \sin^2\left(\frac{\Delta \lambda}{2}\right)$$
+   $$c = 2 \cdot \text{atan2}(\sqrt{a}, \sqrt{1 - a}), \quad d = R \cdot c \quad (R = 6,371,000\text{ m})$$
+   *Clamped to $[0, 1]$ against floating-point boundary imprecision.*
+
+2. **Derived Speed Kinematics:**
+   $$v_{\text{derived}} = \frac{\Delta d}{\Delta t}$$
+   Calculates actual movement velocity from sequential device timestamps. If reported GPS sensor velocity is absent, derived velocity takes precedence.
+
+3. **Telemetry Freshness Thresholds:**
+   $$\text{Status} = \begin{cases} \text{LIVE} & \Delta t \le 90\text{ seconds} \\ \text{STALE} & 90 < \Delta t \le 300\text{ seconds} \\ \text{OFFLINE} & \Delta t > 300\text{ seconds} \end{cases}$$
+
+4. **Implausible Jump Outlier Detection:**
+   Flags impossible GPS jumps if $v > 50\text{ m/s}$ ($180\text{ km/h}$) or if $\Delta d > 300\text{ m}$ within $\Delta t < 2\text{ s}$, preventing sensor glitches from distorting fleet metrics.
+
+5. **Anti-Flooding Rate Limiting:**
+   Enforces a minimum interval of 0.8s between consecutive device fixes per tracking session (`429 RATE_LIMITED`).
+
+### Device Lifecycle & Security
+- **Device Registration (`/devices/register`):** Client-side platform capability detection without invasive tracking.
+- **Revocation Protection:** Revoking a device instantly halts active tracking sessions and blocks further GPS fix ingestion with `403 DEVICE_REVOKED`.
+- **E.164 Normalization & Phone Verification:** International number parsing (`phonenumbers` library), carrier detection, and rate-limited 6-digit challenge verification with SHA-256 hashed storage.
+- **Privacy Boundaries:** A phone number is an identifier, not a sensor. Real GPS coordinates are ingested exclusively from browser HTML5 Geolocation with explicit driver consent. Zero simulated or fabricated coordinates in production databases.
+
+### Extensible Provider Architecture (`app/providers.py`)
+FleetWise abstracts external integrations via clean interfaces:
+- `BaseTelematicsProvider`: Direct hardware GPS / OBD-II dongle streaming.
+- `BaseIPGeolocationProvider`: IP-to-city lookup for network context (explicitly disclosed as approximate, NOT GPS).
+- `BaseSMSGatewayProvider`: Multi-tenant SMS delivery for OTP challenges.
+
+## 6. Real Smartphone GPS Tracking, Vehicle Tracking & Street View
 
 FleetWise supports **genuine physical device GPS tracking** using your smartphone:
 
@@ -210,7 +255,7 @@ Execute the comprehensive automated test suite (verifying T1–T12, snapshot com
 pytest -v
 ```
 
-All **30 / 30 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
+All **39 / 39 tests passed (100% pass rate)**. Test evidence is logged directly to [`evidence/test_results.json`](evidence/test_results.json).
 
 To re-run the Playwright browser judge flow:
 ```bash
