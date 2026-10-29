@@ -206,6 +206,42 @@ def health_check():
     }
 
 
+@app.get("/network-info")
+def get_network_info():
+    import socket
+    ip = "127.0.0.1"
+    try:
+        _, _, ips = socket.gethostbyname_ex(socket.gethostname())
+        # Filter loopback and APIPA
+        usable = [a for a in ips if not a.startswith("169.254.") and not a.startswith("127.")]
+        # Prioritize physical Wi-Fi / LAN (10.x.x.x, standard 192.168.x.x)
+        for cand in usable:
+            if cand.startswith("10."):
+                ip = cand
+                break
+        if ip == "127.0.0.1":
+            for cand in usable:
+                if cand.startswith("192.168.") and not cand.startswith("192.168.84.") and not cand.startswith("192.168.152."):
+                    ip = cand
+                    break
+        if ip == "127.0.0.1" and usable:
+            ip = usable[0]
+    except Exception:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            ip = "127.0.0.1"
+    return {
+        "local_ip": ip,
+        "port": 8000,
+        "lan_url": f"http://{ip}:8000",
+        "localhost_url": "http://127.0.0.1:8000",
+    }
+
+
 @app.get("/metrics")
 def get_metrics():
     with read_conn() as conn:

@@ -148,6 +148,11 @@
             <span class="hide-sm">Sync</span>
           </button>
 
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-open-share" aria-label="Share Link & Mobile QR Code" title="Share Public Link & Mobile QR Code">
+            <span data-icon="share"></span>
+            <span class="hide-sm">Share &amp; QR</span>
+          </button>
+
           <button type="button" class="btn btn-secondary btn-sm" id="btn-cmd-palette" aria-label="Open Command Palette (Ctrl+K)">
             <span data-icon="search"></span>
             <span class="hide-sm">Command</span>
@@ -179,6 +184,31 @@
       <main id="main-content" class="viewport" tabindex="-1">
         <!-- ==================== VIEW 1: COMMAND CENTER ==================== -->
         <section id="view-dashboard" class="view-section active" aria-labelledby="page-title">
+          <!-- Layers AI Inspired Modern Hero Section -->
+          <div class="layers-hero-banner mb-xl">
+            <div class="layers-hero-content">
+              <div class="layers-hero-badges mb-sm">
+                <span class="layers-pill"><span class="pulse-dot"></span> AUTONOMOUS DISPATCH v2.4</span>
+                <span class="layers-pill layers-pill-glass">SQLITE WAL &bull; BEGIN IMMEDIATE</span>
+                <span class="layers-pill layers-pill-glass" id="hero-lan-pill">LAN: INITIALIZING</span>
+              </div>
+              <h2 class="layers-hero-title">Conflict-Free Fleet &amp; Real-Time Telemetry Control Room</h2>
+              <p class="layers-hero-sub">
+                Cinematic dispatch coordination, atomic resource reservation, sub-second GPS smartphone telemetry, and automated vehicle routing.
+              </p>
+              <div class="layers-hero-actions mt-md">
+                <button type="button" class="btn btn-primary" id="btn-hero-dispatch">
+                  <span data-icon="dispatch"></span><span>Launch Dispatch Assistant</span>
+                </button>
+                <button type="button" class="btn btn-secondary" id="btn-hero-share">
+                  <span data-icon="share"></span><span>Connect Mobile Phone GPS</span>
+                </button>
+                <button type="button" class="btn btn-ghost" id="btn-hero-radar">
+                  <span data-icon="navigation"></span><span>Live Fleet Radar</span>
+                </button>
+              </div>
+            </div>
+          </div>
           <!-- Bento KPI Row -->
           <div class="bento-grid">
             <article class="kpi-card" aria-label="Available Fleet">
@@ -971,6 +1001,43 @@
 
               <!-- Mini map for driver feedback -->
               <div class="tracking-map-container mt-md" id="driver-mini-map" style="height:220px;"></div>
+
+              <!-- Automated Device Intelligence Card (Populated on location permission) -->
+              <div class="device-intelligence-card mt-md" id="driver-device-intel-panel" style="display:none;">
+                <div class="intel-header">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="layers-pill"><span class="pulse-dot"></span> SENSOR GRANTED</span>
+                    <strong style="font-size:12px; letter-spacing:0.04em;">LIVE HARDWARE TELEMETRY HUD</strong>
+                  </div>
+                  <span class="badge badge-success" id="intel-auto-registered-badge">Auto-Registered</span>
+                </div>
+                <div class="intel-grid mt-sm">
+                  <div class="intel-item">
+                    <span class="intel-label">DEVICE &amp; OS</span>
+                    <span class="intel-value" id="intel-device-os">—</span>
+                  </div>
+                  <div class="intel-item">
+                    <span class="intel-label">BROWSER ENGINE</span>
+                    <span class="intel-value" id="intel-browser-engine">—</span>
+                  </div>
+                  <div class="intel-item">
+                    <span class="intel-label">SCREEN MATRIX</span>
+                    <span class="intel-value" id="intel-screen-res">—</span>
+                  </div>
+                  <div class="intel-item">
+                    <span class="intel-label">CPU / THREADS</span>
+                    <span class="intel-value" id="intel-cpu-cores">—</span>
+                  </div>
+                  <div class="intel-item">
+                    <span class="intel-label">BATTERY STATUS</span>
+                    <span class="intel-value" id="intel-battery">—</span>
+                  </div>
+                  <div class="intel-item">
+                    <span class="intel-label">NETWORK BANDWIDTH</span>
+                    <span class="intel-value" id="intel-network">—</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -1708,11 +1775,61 @@
     </div>
   </div>
 
-<!-- Toast Stack -->
+  <!-- Modal: Share Public Link & Mobile QR Code -->
+  <div class="modal-backdrop hidden" id="modal-share-link" role="dialog" aria-modal="true" aria-labelledby="modal-share-title">
+    <div class="modal-dialog" style="max-width: 520px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="layers-pill"><span class="pulse-dot"></span> LIVE ACCESS</span>
+          <h3 class="modal-title" id="modal-share-title" style="margin:0;">Instant Mobile &amp; Network Share</h3>
+        </div>
+        <button type="button" class="modal-close" data-close-modal="modal-share-link" aria-label="Close modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="panel-desc" style="margin-bottom: var(--space-md);">
+          Connect any smartphone, tablet, or secondary workstation instantly. Scan the QR code with your mobile camera or copy the network URL.
+        </p>
+        
+        <div class="share-qr-wrap mb-md">
+          <div id="share-qr-container" style="display:flex; justify-content:center; align-items:center; background:#ffffff; padding:16px; border-radius:12px; margin:0 auto; width: fit-content; box-shadow: 0 8px 30px rgba(0,240,255,0.15);"></div>
+          <div class="text-center mt-sm">
+            <span class="badge badge-success">Scan with Phone Camera</span>
+          </div>
+        </div>
+
+        <div class="form-group mb-md">
+          <label for="share-lan-url" class="form-label">DIRECT LAN ACCESS URL</label>
+          <div style="display:flex; gap:var(--space-xs);">
+            <input type="text" id="share-lan-url" class="form-input mono" readonly style="font-weight:600; color:var(--color-primary);" />
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-share-url" title="Copy to clipboard">
+              <span data-icon="copy"></span><span>Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card p-sm" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md);">
+          <div style="display:flex; align-items:center; gap:var(--space-xs); font-weight:600; font-size:12px; color:var(--color-secondary);">
+            <span data-icon="zap"></span> PUBLIC INTERNET ACCESS VIA SECURE TUNNEL
+          </div>
+          <p class="kpi-sub mt-xs" style="font-size:11px; margin:4px 0 0 0;">
+            To share outside your local Wi-Fi across the public internet, execute:
+            <code class="mono" style="color:var(--color-primary); background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; display:inline-block; margin-top:4px;">npx localtunnel --port 8000</code>
+            or run <code class="mono" style="color:var(--color-primary);">scripts/share_online.bat</code>.
+          </p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-modal="modal-share-link">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Stack -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <!-- Local Vendored Leaflet Map Engine (Zero CDN Dependency) -->
   <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/vendor/qrcode.js"></script>
   <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

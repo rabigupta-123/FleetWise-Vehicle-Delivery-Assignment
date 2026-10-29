@@ -1973,7 +1973,143 @@ function updateDriverGpsCard(driverId) {
   }
 }
 
+/* ==================== AUTOMATED HARDWARE TELEMETRY & DEVICE INTELLIGENCE ==================== */
+function inspectClientHardware() {
+  const ua = navigator.userAgent || '';
+  let os = 'Unknown OS';
+  let deviceType = 'Desktop';
+  
+  if (/Android/i.test(ua)) {
+    os = 'Android';
+    deviceType = 'Mobile';
+  } else if (/iPhone|iPod/i.test(ua)) {
+    os = 'iOS';
+    deviceType = 'Mobile';
+  } else if (/iPad/i.test(ua)) {
+    os = 'iPadOS';
+    deviceType = 'Tablet';
+  } else if (/Windows/i.test(ua)) {
+    os = 'Windows';
+    deviceType = 'Desktop';
+  } else if (/Macintosh|Mac OS X/i.test(ua)) {
+    os = 'macOS';
+    deviceType = 'Desktop';
+  } else if (/Linux/i.test(ua)) {
+    os = 'Linux';
+    deviceType = 'Desktop';
+  }
+
+  let browser = 'Unknown Browser';
+  if (/Edg/i.test(ua)) browser = 'Microsoft Edge';
+  else if (/Chrome/i.test(ua)) browser = 'Google Chrome';
+  else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = 'Apple Safari';
+  else if (/Firefox/i.test(ua)) browser = 'Mozilla Firefox';
+  else if (/Opera|OPR/i.test(ua)) browser = 'Opera';
+
+  const dpr = window.devicePixelRatio || 1;
+  const screenRes = `${window.screen.width}x${window.screen.height} (@${dpr}x DPR)`;
+  const cpuCores = navigator.hardwareConcurrency ? `${navigator.hardwareConcurrency} Cores` : 'N/A';
+  
+  let networkInfo = 'Online';
+  if (navigator.connection) {
+    const conn = navigator.connection;
+    const eff = conn.effectiveType ? conn.effectiveType.toUpperCase() : '';
+    const rtt = conn.rtt != null ? `${conn.rtt}ms RTT` : '';
+    const down = conn.downlink != null ? `${conn.downlink}Mbps` : '';
+    networkInfo = [eff, down, rtt].filter(Boolean).join(' · ') || 'Online';
+  }
+
+  return {
+    os,
+    deviceType,
+    browser,
+    screenRes,
+    cpuCores,
+    networkInfo,
+    platform: navigator.platform || os,
+    touchPoints: navigator.maxTouchPoints || 0,
+    ua: ua.slice(0, 120),
+  };
+}
+
+async function getBatteryStatus() {
+  if (typeof navigator.getBattery === 'function') {
+    try {
+      const b = await navigator.getBattery();
+      const pct = Math.round(b.level * 100);
+      return `${pct}% ${b.charging ? '(⚡ Charging)' : '(🔋 Battery)'}`;
+    } catch (_) {}
+  }
+  return 'Not Available';
+}
+
+let _deviceAlreadyAutoRegistered = false;
+
+async function autoInspectAndRegisterDevice(driverId, coords) {
+  if (_deviceAlreadyAutoRegistered) return;
+  _deviceAlreadyAutoRegistered = true;
+
+  const info = inspectClientHardware();
+  const battery = await getBatteryStatus();
+
+  // Populate HUD card
+  const panel = document.getElementById('driver-device-intel-panel');
+  const osEl = document.getElementById('intel-device-os');
+  const browserEl = document.getElementById('intel-browser-engine');
+  const resEl = document.getElementById('intel-screen-res');
+  const cpuEl = document.getElementById('intel-cpu-cores');
+  const batEl = document.getElementById('intel-battery');
+  const netEl = document.getElementById('intel-network');
+
+  if (osEl) osEl.textContent = `${info.os} (${info.deviceType})`;
+  if (browserEl) browserEl.textContent = info.browser;
+  if (resEl) resEl.textContent = info.screenRes;
+  if (cpuEl) cpuEl.textContent = info.cpuCores;
+  if (batEl) batEl.textContent = battery;
+  if (netEl) netEl.textContent = info.networkInfo;
+
+  if (panel) {
+    panel.style.display = 'block';
+  }
+
+  // Register device on backend automatically
+  try {
+    const regPayload = {
+      driver_id: driverId,
+      nickname: `${info.os} ${info.deviceType} (${info.browser})`,
+      os_family: info.os,
+      browser_family: info.browser,
+      platform: info.platform,
+      screen_res: `${window.screen.width}x${window.screen.height}`,
+      permission_status: 'granted',
+      capabilities: {
+        device_type: info.deviceType,
+        cpu_cores: navigator.hardwareConcurrency || null,
+        max_touch_points: info.touchPoints,
+        battery: battery,
+        network: info.networkInfo,
+        gps_accuracy: coords ? coords.accuracy : null,
+      },
+    };
+
+    await apiRequest('/devices/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(regPayload),
+    });
+
+    showToast(`Device Hardware Telemetry Auto-Registered: ${info.os} ${info.deviceType}`);
+    refreshAllData(true);
+  } catch (err) {
+    console.warn('Auto device registration notice:', err);
+  }
+}
+
 function handleIncomingGpsFix(pos) {
+  // Auto-inspect and register device metadata upon location permission & first fix
+  if (TRACKING_STATE.activeDriverId && !_deviceAlreadyAutoRegistered) {
+    autoInspectAndRegisterDevice(TRACKING_STATE.activeDriverId, pos.coords);
+  }
   const coords = pos.coords;
   const lat = coords.latitude;
   const lng = coords.longitude;
@@ -2762,6 +2898,13 @@ function setupEventListeners() {
     }
   });
 
+  // Share & Mobile QR Code
+  document.getElementById('btn-open-share')?.addEventListener('click', openShareModal);
+  document.getElementById('btn-hero-share')?.addEventListener('click', openShareModal);
+  document.getElementById('btn-copy-share-url')?.addEventListener('click', copyShareUrl);
+  document.getElementById('btn-hero-dispatch')?.addEventListener('click', () => switchView('dispatch'));
+  document.getElementById('btn-hero-radar')?.addEventListener('click', () => switchView('vehicle-tracking'));
+
   // Device Inventory listeners
   document.getElementById('btn-open-register-device')?.addEventListener('click', openRegisterDeviceModal);
   document.getElementById('btn-refresh-devices')?.addEventListener('click', async () => {
@@ -2787,7 +2930,7 @@ function setupEventListeners() {
       e.preventDefault();
       openCommandPalette();
     } else if (e.key === 'Escape') {
-      ['modal-cmd', 'modal-vehicle', 'modal-driver', 'modal-delivery', 'modal-blocked-queue', 'modal-shortcuts', 'modal-driver-phone'].forEach(closeModal);
+      ['modal-cmd', 'modal-vehicle', 'modal-driver', 'modal-delivery', 'modal-blocked-queue', 'modal-shortcuts', 'modal-driver-phone', 'modal-share-link', 'modal-device-register', 'modal-phone-verify'].forEach(closeModal);
     } else if (!isTyping && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (e.key === '?') {
         e.preventDefault();
@@ -2809,11 +2952,72 @@ function setupEventListeners() {
   });
 }
 
+/* ==================== SHARE LINK & QR CODE ==================== */
+let _qrInstance = null;
+
+async function openShareModal() {
+  try {
+    let lanUrl = window.location.origin;
+    try {
+      const net = await apiRequest('/network-info');
+      if (net && net.lan_url) {
+        lanUrl = net.lan_url;
+      }
+    } catch (_) {}
+
+    const input = document.getElementById('share-lan-url');
+    if (input) input.value = lanUrl;
+
+    const qrContainer = document.getElementById('share-qr-container');
+    if (qrContainer && window.QRCode) {
+      qrContainer.innerHTML = '';
+      _qrInstance = new window.QRCode(qrContainer, {
+        text: lanUrl,
+        width: 190,
+        height: 190,
+        colorDark: '#07090E',
+        colorLight: '#FFFFFF',
+        correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 2,
+      });
+    }
+
+    openModal('modal-share-link');
+  } catch (err) {
+    console.warn('Error opening share modal:', err);
+    openModal('modal-share-link');
+  }
+}
+
+async function copyShareUrl() {
+  const input = document.getElementById('share-lan-url');
+  if (!input || !input.value) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    showToast('Direct LAN URL copied! Anyone on your Wi-Fi can open it.');
+  } catch (_) {
+    input.select();
+    document.execCommand('copy');
+    showToast('Direct LAN URL copied!');
+  }
+}
+
+async function initNetworkInfoBanner() {
+  try {
+    const net = await apiRequest('/network-info');
+    const heroPill = document.getElementById('hero-lan-pill');
+    if (heroPill && net && net.local_ip) {
+      heroPill.textContent = `LAN: ${net.local_ip}:${net.port || 8000}`;
+      heroPill.title = `Access from any phone on this Wi-Fi: ${net.lan_url}`;
+    }
+  } catch (_) {}
+}
+
 /* ==================== INITIALIZE ==================== */
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   hydrateStaticIcons();
   setupEventListeners();
+  initNetworkInfoBanner();
   setupSSE();
   await refreshAllData(true);
 

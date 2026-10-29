@@ -1883,3 +1883,250 @@ select:focus-visible,
   background: var(--color-card) !important;
 }
 
+
+/* ==========================================================================
+   LAYERS AI (getlayers.ai) CINEMATIC SPATIAL AESTHETIC UPGRADE
+   Frosted Glassmorphism, Atmospheric Aurora Glows, Micro-Borders, & Telemetry
+   ========================================================================== */
+
+/* Atmospheric Space Canvas with Layered Aurora Spotlights */
+body {
+  background-color: var(--color-background) !important;
+  background-image: 
+    radial-gradient(circle at 90% 10%, rgba(0, 240, 255, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 10% 85%, rgba(99, 102, 241, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.04) 0%, transparent 60%);
+  background-attachment: fixed;
+  background-size: cover;
+}
+
+/* Glassmorphism Structural Panels */
+.sidebar {
+  background: rgba(11, 15, 23, 0.88) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+.header {
+  background: rgba(11, 15, 23, 0.82) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Cinematic Card Elevation with Subtle Multi-stop Sheen */
+.stat-card,
+.table-card,
+.toolbar-panel,
+.panel,
+.lane-column,
+.drawer-panel,
+.modal-dialog {
+  background: rgba(16, 22, 34, 0.72) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 12px 32px -8px rgba(0, 0, 0, 0.55) !important;
+  transition: transform 220ms cubic-bezier(0.2, 1, 0.3, 1), box-shadow 220ms cubic-bezier(0.2, 1, 0.3, 1), border-color 220ms ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(0, 240, 255, 0.3) !important;
+  box-shadow: inset 0 1px 0 rgba(0, 240, 255, 0.2), 0 16px 36px -8px rgba(0, 0, 0, 0.65), 0 0 20px rgba(0, 240, 255, 0.12) !important;
+}
+
+/* Layers Hero Banner in Command Center */
+.layers-hero-banner {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  margin-bottom: var(--space-xl);
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.1) 0%, rgba(99, 102, 241, 0.08) 50%, rgba(168, 85, 247, 0.05) 100%);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.layers-hero-banner::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(0, 240, 255, 0.2) 0%, transparent 70%);
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+.layers-hero-title {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #FFFFFF 0%, #A5F3FC 60%, #818CF8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 6px;
+}
+
+.layers-hero-sub {
+  color: var(--color-muted-foreground);
+  font-size: 13px;
+  max-width: 680px;
+  line-height: 1.5;
+}
+
+.layers-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.layers-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-foreground);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.layers-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 8px var(--color-primary);
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Nav Item Upgrades */
+.nav-item {
+  position: relative;
+  border-radius: var(--radius-md) !important;
+  font-size: 13px !important;
+  transition: all 180ms ease !important;
+}
+
+.nav-item.active {
+  background: linear-gradient(90deg, rgba(0, 240, 255, 0.16) 0%, rgba(99, 102, 241, 0.08) 100%) !important;
+  border-left: 3px solid var(--color-primary) !important;
+  color: #FFFFFF !important;
+  box-shadow: inset 0 0 16px rgba(0, 240, 255, 0.08) !important;
+}
+
+.nav-item:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--color-foreground) !important;
+  transform: translateX(2px);
+}
+
+/* High-End Primary Button Styling */
+.btn-primary {
+  background: linear-gradient(135deg, #00F0FF 0%, #0284C7 100%) !important;
+  color: #040810 !important;
+  font-weight: 700 !important;
+  border: none !important;
+  box-shadow: 0 4px 16px -2px rgba(0, 240, 255, 0.42) !important;
+  letter-spacing: 0.01em;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 6px 24px rgba(0, 240, 255, 0.6) !important;
+}
+
+/* Share & QR Code Modal Presentation */
+.share-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(7, 9, 14, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+  box-shadow: inset 0 0 30px rgba(0, 240, 255, 0.08);
+}
+
+.share-qr-canvas-holder {
+  padding: 12px;
+  background: #07090E;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+.share-link-input-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* Automated Device Intelligence Live HUD Card */
+.device-intelligence-card {
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.9) 0%, rgba(24, 32, 50, 0.85) 100%) !important;
+  border: 1px solid rgba(0, 240, 255, 0.3) !important;
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.6), 0 0 24px -4px rgba(0, 240, 255, 0.15);
+}
+
+.device-intel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.device-intel-item {
+  background: rgba(7, 9, 14, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.intel-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted-foreground);
+}
+
+.intel-val {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-foreground);
+}
+
+.intel-val-accent {
+  color: var(--color-primary);
+}
+
+.intel-val-green {
+  color: #34D399;
+}

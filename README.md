@@ -265,4 +265,35 @@ Outputs screenshots directly into [`evidence/screenshots_v2/`](evidence/screensh
 
 > **Note on Example Rows:** The CSV/JSON rows shown above are purely illustrative templates. FleetWise starts with a completely empty database; zero pre-seeded records exist. All records enter strictly via user import or interactive creation modals.
 
+---
+
+## 8. Modern UI Elevation, Mobile Sharing & Hardware Telemetry
+
+### 🌌 Layers AI Design System Elevation
+FleetWise has been upgraded with a cinematic, modern dark-mode aesthetic inspired by **[Layers AI](https://www.getlayers.ai/)**:
+- **Obsidian Canvas & Atmospheric Radial Glows:** High-tech `#07090E` surface with cyan (`#00F0FF`) and aurora indigo (`#6366F1`) subtle atmospheric light spots.
+- **Frosted Glassmorphism:** Micro-borders with `backdrop-filter: blur(18px)` across bento KPI cards, modal dialogs, and navigation controls.
+- **Typography:** `Plus Jakarta Sans` for clean telemetry metrics and `Fira Code` for atomic transaction IDs.
+
+### 📱 Real Camera-Scannable QR Code & LAN Access
+- **Network Discovery Endpoint:** `GET /network-info` detects the physical Wi-Fi IP address (e.g. `http://10.99.160.62:8000`).
+- **Zero-Dependency Vendored QR Code:** Pure client-side standard QR generator (`static/vendor/qrcode.js`) produces high-contrast, camera-scannable QR codes for iOS Camera and Google Lens.
+- **One-Click Share Modal:** Accessible from the top header or command center hero banner.
+
+### 🌐 Instant Public Internet Access (Secure HTTPS Tunnel)
+To share FleetWise outside your local Wi-Fi with remote clients or mobile devices anywhere in the world:
+- **Windows Batch Launcher:** Double-click [`scripts/share_online.bat`](scripts/share_online.bat)
+- **PowerShell Script:** Run [`scripts/share_online.ps1`](scripts/share_online.ps1)
+- Or run in terminal:
+  ```bash
+  npx --yes localtunnel --port 8000
+  ```
+
+### ⚡ Automated Device Intelligence & Hardware Telemetry HUD
+The moment the driver grants browser Geolocation permission:
+1. **Automated Client Hardware Inspection:** Client-side detection of operating system, browser engine, screen DPR matrix, CPU concurrency (`navigator.hardwareConcurrency`), battery charge state (`navigator.getBattery()`), and network downlink bandwidth (`navigator.connection`).
+2. **Auto-Registration:** Sends `POST /devices/register` to bind the authenticated device profile to the driver's session.
+3. **Live Hardware Telemetry HUD:** Renders a real-time hardware status card on the Driver Phone GPS portal with instant telemetry feedback.
+
+
 
