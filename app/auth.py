@@ -90,12 +90,24 @@ ROLE_PERMISSIONS = {
 }
 
 
-def check_permission(user: Optional[dict], required_perm: str) -> None:
-    # If no auth is configured/provided, default to allowing operator in demo mode
+def check_permission(user: Optional[dict], required_perm: str, request: Optional[Request] = None) -> None:
+    # If request originates from a public tunnel or FORCE_AUTH is active, authentication is strictly mandatory
+    if request:
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+        is_tunnel = any(d in host.lower() for d in [".loca.lt", ".ngrok-free.app", ".trycloudflare.com"])
+        force_auth = os.environ.get("FORCE_AUTH", "").lower() in ("1", "true", "yes")
+        if (is_tunnel or force_auth) and user is None:
+            raise AppError(401, "UNAUTHORIZED", "Authentication required for external network access. Please log in.")
+
+    # If no auth is provided in local developer mode, default to allowing operator
     if user is None:
+        if os.environ.get("FORCE_AUTH", "").lower() in ("1", "true", "yes"):
+            raise AppError(401, "UNAUTHORIZED", "Authentication required.")
         return
+
     role = user.get("role", "operator")
     allowed = ROLE_PERMISSIONS.get(role, set())
     if required_perm not in allowed and "ops_lead" not in role:
         raise AppError(403, "FORBIDDEN", f"Role '{role}' is not authorized to access '{required_perm}'.")
+
 

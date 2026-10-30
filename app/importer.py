@@ -2,7 +2,7 @@ import csv
 import io
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 import sqlite3
 
@@ -232,7 +232,9 @@ def validate_drivers_rows(rows: list[dict[str, Any]], conn: sqlite3.Connection) 
         raw_id = str(r.get("driver_id") or "").strip()
         name = str(r.get("name") or "").strip()
         phone = str(r.get("phone") or "").strip()
-        raw_status = str(r.get("availability_status") or "available").strip().lower()
+        raw_status = str(r.get("availability_status") or r.get("status") or "available").strip().lower()
+        if raw_status == "inactive":
+            raw_status = "unavailable"
 
         if not name:
             row_errors.append({"row": idx, "field": "name", "code": "VALIDATION_ERROR", "reason": "name is required"})
@@ -311,10 +313,15 @@ def validate_deliveries_rows(rows: list[dict[str, Any]], conn: sqlite3.Connectio
     for idx, r in enumerate(rows, start=1):
         row_errors = []
         raw_id = str(r.get("delivery_id") or "").strip()
-        pickup = str(r.get("pickup") or "").strip()
-        dropoff = str(r.get("dropoff") or "").strip()
+        pickup = str(r.get("pickup") or r.get("pickup_address") or "").strip()
+        dropoff = str(r.get("dropoff") or r.get("delivery_address") or "").strip()
         sched_time = str(r.get("scheduled_time") or "").strip()
+        if not sched_time:
+            # Automatic graceful fallback to 4 hours ahead in UTC ISO-8601
+            sched_time = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
         priority = str(r.get("priority") or "normal").strip().lower()
+        if priority == "medium":
+            priority = "normal"
         raw_cap = r.get("required_capacity")
         raw_status = str(r.get("status") or "pending").strip().lower()
 

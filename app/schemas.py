@@ -169,9 +169,12 @@ class TrackingSessionStop(BaseModel):
 class GPSLocationCreate(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=50)
     device_id: Optional[str] = Field(default=None, max_length=50)
+    driver_id: Optional[str] = Field(default=None, max_length=50)
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     accuracy: float = Field(..., ge=0.0)
+    altitude: Optional[float] = None
+    altitude_accuracy: Optional[float] = Field(default=None, ge=0.0)
     speed: Optional[float] = Field(default=None, ge=0.0)
     heading: Optional[float] = Field(default=None, ge=0.0, le=360.0)
     device_timestamp: str = Field(..., min_length=1)
@@ -185,12 +188,19 @@ class GPSLocationCreate(BaseModel):
 class DeviceRegisterRequest(BaseModel):
     driver_id: str = Field(..., min_length=1, max_length=50)
     nickname: str = Field(..., min_length=1, max_length=80)
+    device_category: Optional[str] = Field(default=None, max_length=50)
+    model: Optional[str] = Field(default=None, max_length=100)
     os_family: Optional[str] = Field(default=None, max_length=50)
+    os_version: Optional[str] = Field(default=None, max_length=50)
     browser_family: Optional[str] = Field(default=None, max_length=50)
+    browser_version: Optional[str] = Field(default=None, max_length=50)
     platform: Optional[str] = Field(default=None, max_length=50)
-    screen_res: Optional[str] = Field(default=None, max_length=30)
+    screen_res: Optional[str] = Field(default=None, max_length=100)
     capabilities: Optional[dict] = None
     permission_status: Literal["granted", "prompt", "denied"] = "prompt"
+    client_device_token: Optional[str] = Field(default=None, max_length=100)
+    identity_confidence: Optional[str] = Field(default="client_storage_token", max_length=50)
+    detection_limitations: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("nickname")
     @classmethod
@@ -199,6 +209,19 @@ class DeviceRegisterRequest(BaseModel):
         if not s:
             raise ValueError("nickname cannot be empty")
         return s
+
+
+class DeviceRenameRequest(BaseModel):
+    nickname: str = Field(..., min_length=1, max_length=80)
+
+    @field_validator("nickname")
+    @classmethod
+    def strip_nickname(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("nickname cannot be empty")
+        return s
+
 
 
 class DeviceRevokeRequest(BaseModel):

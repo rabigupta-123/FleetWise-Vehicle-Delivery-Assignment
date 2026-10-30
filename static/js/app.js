@@ -456,8 +456,11 @@ function renderDeliveriesTable() {
         `;
       } else if (d.status === 'in_transit') {
         actions = `
-          <button type="button" class="btn btn-primary btn-xs" data-transition-delivery="${escapeHtml(d.delivery_id)}" data-target-status="delivered">
-            ${icon('checkCircle', 12)}<span>Complete</span>
+          <button type="button" class="btn btn-primary btn-xs" style="background:#10B981; border-color:#059669;" data-transition-delivery="${escapeHtml(d.delivery_id)}" data-target-status="delivered">
+            ${icon('checkCircle', 12)}<span>Delivered</span>
+          </button>
+          <button type="button" class="btn btn-danger btn-xs" data-transition-delivery="${escapeHtml(d.delivery_id)}" data-target-status="cancelled">
+            <span>Cancel</span>
           </button>
         `;
       } else {
@@ -1409,7 +1412,115 @@ async function renderAnalytics() {
         `;
       }
     }
-  } catch {}
+
+    // 2. Fetch Executive Overview
+    try {
+      const ov = await apiRequest('/analytics/overview');
+      if (ov) {
+        const fltUtil = ov.fleet?.fleet_utilization_pct ?? 0;
+        const drvUtil = ov.drivers?.driver_utilization_pct ?? 0;
+        const compRate = ov.deliveries?.completion_rate_pct ?? 0;
+        const onTimeRate = ov.deliveries?.on_time_rate_pct ?? 0;
+
+        const kpiFlt = document.getElementById('kpi-fleet-util');
+        const kpiFltSub = document.getElementById('kpi-fleet-sub');
+        const kpiDrv = document.getElementById('kpi-driver-util');
+        const kpiDrvSub = document.getElementById('kpi-driver-sub');
+        const kpiComp = document.getElementById('kpi-completion-rate');
+        const kpiCompSub = document.getElementById('kpi-completion-sub');
+        const kpiOnTime = document.getElementById('kpi-ontime-rate');
+        const kpiOnTimeSub = document.getElementById('kpi-ontime-sub');
+
+        if (kpiFlt) kpiFlt.textContent = `${fltUtil}%`;
+        if (kpiFltSub) kpiFltSub.textContent = `${ov.fleet?.assigned_vehicles || 0} of ${ov.fleet?.active_pool_vehicles || 0} active pool assigned`;
+        if (kpiDrv) kpiDrv.textContent = `${drvUtil}%`;
+        if (kpiDrvSub) kpiDrvSub.textContent = `${ov.drivers?.assigned_drivers || 0} of ${ov.drivers?.eligible_active_drivers || 0} eligible drivers assigned`;
+        if (kpiComp) kpiComp.textContent = `${compRate}%`;
+        if (kpiCompSub) kpiCompSub.textContent = `${ov.deliveries?.delivered_count || 0} of ${ov.deliveries?.eligible_deliveries_count || 0} eligible delivered`;
+        if (kpiOnTime) kpiOnTime.textContent = `${onTimeRate}%`;
+        if (kpiOnTimeSub) kpiOnTimeSub.textContent = `${ov.deliveries?.completed_with_deadline_count || 0} orders with deadline audited`;
+      }
+    } catch (e) {
+      console.warn('Overview analytics failed:', e);
+    }
+
+    // 3. Fetch Telemetry Accuracy Quality
+    try {
+      const acc = await apiRequest('/analytics/accuracy');
+      if (acc && acc.session_scores && acc.session_scores.length > 0) {
+        const top = acc.session_scores[0].telemetry_quality || {};
+        const comps = top.component_scores || {};
+        document.getElementById('lbl-gps-quality').textContent = comps.gps_quality != null ? `${comps.gps_quality}/100` : 'Unavailable';
+        document.getElementById('lbl-freshness-quality').textContent = comps.freshness != null ? `${comps.freshness}/100` : 'Unavailable';
+        document.getElementById('lbl-movement-quality').textContent = comps.movement_consistency != null ? `${comps.movement_consistency}/100` : 'Normal';
+        document.getElementById('lbl-completeness-quality').textContent = comps.data_completeness != null ? `${comps.data_completeness}%` : 'Unavailable';
+        document.getElementById('lbl-overall-quality').textContent = top.telemetry_quality_score != null ? `${top.telemetry_quality_score}/100` : 'Pending';
+      } else {
+        document.getElementById('lbl-gps-quality').textContent = 'No signal';
+        document.getElementById('lbl-freshness-quality').textContent = 'No signal';
+        document.getElementById('lbl-movement-quality').textContent = 'No trajectory';
+        document.getElementById('lbl-completeness-quality').textContent = 'N/A';
+        document.getElementById('lbl-overall-quality').textContent = 'Awaiting Telemetry';
+      }
+    } catch {}
+
+    // 4. Fetch Confidence Evaluations
+    try {
+      const conf = await apiRequest('/analytics/confidence');
+      if (conf) {
+        const devs = conf.device_identity_confidence || [];
+        if (devs.length > 0) {
+          const topDev = devs[0].confidence || {};
+          document.getElementById('lbl-device-conf').textContent = `${topDev.confidence_score || 0}/100 (${topDev.level || 'LOW'})`;
+          document.getElementById('lbl-device-trust').textContent = topDev.is_trusted ? 'Verified Token' : 'Unverified';
+        } else {
+          document.getElementById('lbl-device-conf').textContent = 'No devices registered';
+          document.getElementById('lbl-device-trust').textContent = 'Awaiting Device';
+        }
+
+        const asgs = conf.assignment_confidence || [];
+        if (asgs.length > 0) {
+          const topAsg = asgs[0].confidence || {};
+          document.getElementById('lbl-asg-constraints').textContent = topAsg.is_eligible ? 'Satisfied (100%)' : 'Violated';
+          document.getElementById('lbl-asg-suitability').textContent = topAsg.capacity_utilization_pct != null ? `${topAsg.capacity_utilization_pct}%` : 'Standard';
+          document.getElementById('lbl-overall-asg-conf').textContent = `${topAsg.confidence_score || 0}/100 (${topAsg.level || 'REJECTED'})`;
+        } else {
+          document.getElementById('lbl-asg-constraints').textContent = 'No pending deliveries';
+          document.getElementById('lbl-asg-suitability').textContent = 'Queue Clear';
+          document.getElementById('lbl-overall-asg-conf').textContent = 'Idle';
+        }
+      }
+    } catch {}
+
+    // 5. Fetch Operational Anomalies
+    try {
+      const anom = await apiRequest('/analytics/anomalies?limit=25');
+      const tbody = document.getElementById('tbody-anomalies');
+      if (tbody && anom && anom.anomalies) {
+        if (anom.anomalies.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">No anomalies detected. All operations normal.</td></tr>';
+        } else {
+          tbody.innerHTML = anom.anomalies.map(a => {
+            const sevClass = a.severity === 'CRITICAL' || a.severity === 'HIGH' ? 'badge-danger' : (a.severity === 'MEDIUM' ? 'badge-warning' : 'badge-secondary');
+            return `
+              <tr>
+                <td><code style="font-size:11px;">${escapeHtml(a.event_id)}</code></td>
+                <td><span class="badge ${sevClass}">${escapeHtml(a.severity)}</span></td>
+                <td><span class="badge badge-info">${escapeHtml(a.type)}</span></td>
+                <td><strong>${escapeHtml(a.affected_entity)}</strong></td>
+                <td><span class="meta-time">${escapeHtml(formatTime(a.timestamp))}</span></td>
+                <td><div style="font-size:12px; line-height:1.4;">${escapeHtml(a.detection_reason)}</div></td>
+                <td><span style="font-size:11px; color:var(--color-muted-foreground);">${escapeHtml(a.recommended_investigation)}</span></td>
+              </tr>
+            `;
+          }).join('');
+        }
+      }
+    } catch {}
+
+  } catch (err) {
+    console.error('Failed to render analytics:', err);
+  }
 }
 
 async function renderRouteRadar() {
@@ -1465,9 +1576,14 @@ async function renderRouteRadar() {
 const TRACKING_STATE = {
   activeSessionId: null,
   activeDriverId: null,
+  activeDeviceId: null,
   watchId: null,
   fixCount: 0,
   lastFix: null,
+  lastIngestedTimestamp: 0,
+  batteryCleanup: null,
+  networkCleanup: null,
+  cachedDeviceInfo: null,
 };
 
 const MAPS = {
@@ -1689,7 +1805,7 @@ async function loadVehicleTrackingData(vehicleId, silent = false) {
     ]);
 
     const vehicle = latestRes.vehicle || STATE.vehicles.find((v) => v.vehicle_id === vehicleId) || { vehicle_id: vehicleId };
-    const latest = latestRes.latest_location;
+    const latest = latestRes.latest_location || (latestRes.has_gps ? latestRes : null);
     const isLive = latestRes.is_live;
     const isStale = latestRes.is_stale;
     const statusText = isLive ? 'LIVE' : (isStale ? 'STALE' : 'OFFLINE');
@@ -1882,6 +1998,37 @@ async function loadDeliveryTrackingData(deliveryId, silent = false) {
         ${svBtn}
         ${pickupSvBtn}
         ${dropoffSvBtn}
+
+        ${delivery.status === 'in_transit' ? `
+          <div style="margin-top:var(--space-md); padding-top:var(--space-sm); border-top:1px solid var(--color-border); display:flex; gap:8px;">
+            <button type="button" class="btn btn-primary btn-sm flex-1" style="background:#10B981; border-color:#059669; font-weight:600;" data-transition-delivery="${escapeHtml(delivery.delivery_id)}" data-target-status="delivered">
+              ${icon('checkCircle', 14)}<span>Mark Delivered</span>
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" data-transition-delivery="${escapeHtml(delivery.delivery_id)}" data-target-status="cancelled">
+              <span>Cancel</span>
+            </button>
+          </div>
+        ` : ''}
+        ${delivery.status === 'assigned' ? `
+          <div style="margin-top:var(--space-md); padding-top:var(--space-sm); border-top:1px solid var(--color-border); display:flex; gap:8px;">
+            <button type="button" class="btn btn-secondary btn-sm flex-1" data-transition-delivery="${escapeHtml(delivery.delivery_id)}" data-target-status="in_transit">
+              ${icon('navigation', 14)}<span>Start In-Transit</span>
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" data-transition-delivery="${escapeHtml(delivery.delivery_id)}" data-target-status="cancelled">
+              <span>Cancel</span>
+            </button>
+          </div>
+        ` : ''}
+        ${delivery.status === 'pending' ? `
+          <div style="margin-top:var(--space-md); padding-top:var(--space-sm); border-top:1px solid var(--color-border); display:flex; gap:8px;">
+            <button type="button" class="btn btn-primary btn-sm flex-1" data-dispatch-delivery="${escapeHtml(delivery.delivery_id)}">
+              ${icon('dispatch', 14)}<span>Assign Vehicle</span>
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" data-transition-delivery="${escapeHtml(delivery.delivery_id)}" data-target-status="cancelled">
+              <span>Cancel</span>
+            </button>
+          </div>
+        ` : ''}
       `;
     }
 
@@ -1956,6 +2103,7 @@ function renderDriverGpsPortal() {
       .join('');
 
   updateDriverGpsCard(select.value);
+  initGpsContextStatus();
 }
 
 function updateDriverGpsCard(driverId) {
@@ -1973,159 +2121,508 @@ function updateDriverGpsCard(driverId) {
   }
 }
 
-/* ==================== AUTOMATED HARDWARE TELEMETRY & DEVICE INTELLIGENCE ==================== */
-function inspectClientHardware() {
+/* ==================== AUTOMATED HARDWARE TELEMETRY & DEVICE INTELLIGENCE (PHASE 3, 4, 5, 6) ==================== */
+function initGpsContextStatus() {
+  const secureBadge = document.getElementById('badge-secure-context');
+  const alertBox = document.getElementById('alert-insecure-context');
+  const permBadge = document.getElementById('badge-gps-permission');
+  const trackingBadge = document.getElementById('badge-tracking-state');
+
+  const isSecure = window.isSecureContext === true;
+  if (secureBadge) {
+    if (isSecure) {
+      secureBadge.className = 'badge badge-success';
+      secureBadge.innerHTML = '<span class="pulse-dot"></span> Secure Context Detected (HTTPS / localhost)';
+      if (alertBox) alertBox.classList.add('hidden');
+    } else {
+      secureBadge.className = 'badge badge-warning';
+      secureBadge.innerHTML = '⚠️ Insecure Context (HTTP LAN) &bull; GPS Disabled';
+      if (alertBox) alertBox.classList.remove('hidden');
+    }
+  }
+
+  if (trackingBadge) {
+    if (TRACKING_STATE.activeSessionId) {
+      trackingBadge.className = 'badge badge-success';
+      trackingBadge.textContent = 'GPS tracking active';
+    } else {
+      trackingBadge.className = 'badge status-inactive';
+      trackingBadge.textContent = 'GPS tracking stopped';
+    }
+  }
+
+  // Check Permissions API if supported
+  if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+    navigator.permissions.query({ name: 'geolocation' }).then((perm) => {
+      updatePermissionBadge(perm.state);
+      perm.onchange = () => updatePermissionBadge(perm.state);
+    }).catch(() => {
+      updatePermissionBadge('prompt');
+    });
+  } else {
+    updatePermissionBadge('prompt');
+  }
+
+  // Initial HUD query
+  refreshAllHudCards();
+}
+
+function updatePermissionBadge(state) {
+  const permBadge = document.getElementById('badge-gps-permission');
+  if (!permBadge) return;
+  if (state === 'granted') {
+    permBadge.className = 'badge badge-success';
+    permBadge.textContent = 'Location permission granted';
+  } else if (state === 'denied') {
+    permBadge.className = 'badge badge-danger';
+    permBadge.textContent = 'Location permission denied';
+  } else if (state === 'unavailable') {
+    permBadge.className = 'badge badge-danger';
+    permBadge.textContent = 'Location unavailable';
+  } else {
+    permBadge.className = 'badge badge-secondary';
+    permBadge.textContent = 'Location permission not requested';
+  }
+}
+
+function getOrCreateClientDeviceToken() {
+  const KEY = 'fleetwise_client_device_token';
+  let token = null;
+  try {
+    token = localStorage.getItem(KEY);
+    if (!token || !token.startsWith('FLT-DEV-')) {
+      const array = new Uint8Array(8);
+      (window.crypto || window.msCrypto).getRandomValues(array);
+      const hex = Array.from(array, b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+      token = 'FLT-DEV-' + hex;
+      localStorage.setItem(KEY, token);
+    }
+  } catch (e) {
+    if (!window._ephemeralDeviceToken) {
+      window._ephemeralDeviceToken = 'FLT-DEV-EPH-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+    }
+    token = window._ephemeralDeviceToken;
+  }
+  return token;
+}
+
+async function inspectClientHardware() {
   const ua = navigator.userAgent || '';
   let os = 'Unknown OS';
+  let osVersion = null;
   let deviceType = 'Desktop';
-  
+  let model = null;
+  let manufacturer = 'Unavailable';
+
+  // 1. User-Agent Client Hints if supported (Chromium / Android)
+  if (navigator.userAgentData) {
+    deviceType = navigator.userAgentData.mobile ? 'Smartphone' : 'Desktop';
+    if (typeof navigator.userAgentData.getHighEntropyValues === 'function') {
+      try {
+        const hints = await navigator.userAgentData.getHighEntropyValues([
+          'model',
+          'platform',
+          'platformVersion',
+          'architecture',
+          'bitness',
+          'fullVersionList',
+        ]);
+        if (hints.model && hints.model.trim()) {
+          model = hints.model.trim();
+        }
+        if (hints.platform) {
+          os = hints.platform;
+        }
+        if (hints.platformVersion) {
+          osVersion = hints.platformVersion;
+        }
+      } catch (_) {}
+    }
+  }
+
+  // 2. Client platform & User-Agent regex inspection
   if (/Android/i.test(ua)) {
     os = 'Android';
-    deviceType = 'Mobile';
-  } else if (/iPhone|iPod/i.test(ua)) {
-    os = 'iOS';
-    deviceType = 'Mobile';
-  } else if (/iPad/i.test(ua)) {
+    deviceType = /Tablet|Nexus 7|Nexus 10|SM-T/i.test(ua) ? 'Tablet' : 'Smartphone';
+    const m = ua.match(/Android\s+([\d.]+)/i);
+    if (m) osVersion = m[1];
+    if (!model) {
+      const modelMatch = ua.match(/;\s*([^;]+?)\s+Build\//i);
+      if (modelMatch && modelMatch[1]) model = modelMatch[1].trim();
+    }
+  } else if (/iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
     os = 'iPadOS';
     deviceType = 'Tablet';
+    const m = ua.match(/OS\s+([\d_]+)/i);
+    if (m) osVersion = m[1].replace(/_/g, '.');
+  } else if (/iPhone|iPod/i.test(ua)) {
+    os = 'iOS';
+    deviceType = 'Smartphone';
+    const m = ua.match(/OS\s+([\d_]+)/i);
+    if (m) osVersion = m[1].replace(/_/g, '.');
   } else if (/Windows/i.test(ua)) {
     os = 'Windows';
     deviceType = 'Desktop';
+    if (/Windows NT 10.0/i.test(ua)) osVersion = '10 / 11';
+    else if (/Windows NT 6.3/i.test(ua)) osVersion = '8.1';
+    else if (/Windows NT 6.1/i.test(ua)) osVersion = '7';
   } else if (/Macintosh|Mac OS X/i.test(ua)) {
     os = 'macOS';
     deviceType = 'Desktop';
+    const m = ua.match(/Mac OS X\s+([\d_]+)/i);
+    if (m) osVersion = m[1].replace(/_/g, '.');
   } else if (/Linux/i.test(ua)) {
     os = 'Linux';
     deviceType = 'Desktop';
   }
 
   let browser = 'Unknown Browser';
-  if (/Edg/i.test(ua)) browser = 'Microsoft Edge';
-  else if (/Chrome/i.test(ua)) browser = 'Google Chrome';
-  else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = 'Apple Safari';
-  else if (/Firefox/i.test(ua)) browser = 'Mozilla Firefox';
-  else if (/Opera|OPR/i.test(ua)) browser = 'Opera';
+  let browserVersion = null;
+  if (/Edg\/([\d.]+)/i.test(ua)) {
+    browser = 'Microsoft Edge';
+    browserVersion = ua.match(/Edg\/([\d.]+)/i)[1];
+  } else if (/Chrome\/([\d.]+)/i.test(ua) && !/Edg/i.test(ua)) {
+    browser = 'Google Chrome';
+    browserVersion = ua.match(/Chrome\/([\d.]+)/i)[1];
+  } else if (/Version\/([\d.]+).*Safari/i.test(ua) && !/Chrome/i.test(ua)) {
+    browser = 'Apple Safari';
+    browserVersion = ua.match(/Version\/([\d.]+)/i)[1];
+  } else if (/Firefox\/([\d.]+)/i.test(ua)) {
+    browser = 'Mozilla Firefox';
+    browserVersion = ua.match(/Firefox\/([\d.]+)/i)[1];
+  } else if (/OPR\/([\d.]+)/i.test(ua)) {
+    browser = 'Opera';
+    browserVersion = ua.match(/OPR\/([\d.]+)/i)[1];
+  }
 
   const dpr = window.devicePixelRatio || 1;
-  const screenRes = `${window.screen.width}x${window.screen.height} (@${dpr}x DPR)`;
-  const cpuCores = navigator.hardwareConcurrency ? `${navigator.hardwareConcurrency} Cores` : 'N/A';
-  
-  let networkInfo = 'Online';
-  if (navigator.connection) {
-    const conn = navigator.connection;
-    const eff = conn.effectiveType ? conn.effectiveType.toUpperCase() : '';
-    const rtt = conn.rtt != null ? `${conn.rtt}ms RTT` : '';
-    const down = conn.downlink != null ? `${conn.downlink}Mbps` : '';
-    networkInfo = [eff, down, rtt].filter(Boolean).join(' · ') || 'Online';
-  }
+  const orientation = window.screen.orientation ? window.screen.orientation.type : (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+  const screenRes = `${window.screen.width}x${window.screen.height} (@${dpr}x DPR, ${orientation})`;
+  const cpuCores = navigator.hardwareConcurrency ? `${navigator.hardwareConcurrency} logical cores` : 'Unavailable';
+  const touchDesc = navigator.maxTouchPoints > 0 ? `${navigator.maxTouchPoints} touch points` : 'No touch sensor';
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const language = navigator.language || 'en';
 
   return {
     os,
+    osVersion,
     deviceType,
+    model: model || null,
+    manufacturer,
     browser,
+    browserVersion,
     screenRes,
+    orientation,
     cpuCores,
-    networkInfo,
+    touchDesc,
+    timeZone,
+    language,
     platform: navigator.platform || os,
-    touchPoints: navigator.maxTouchPoints || 0,
-    ua: ua.slice(0, 120),
+    ua: ua.slice(0, 160),
   };
 }
 
-async function getBatteryStatus() {
-  if (typeof navigator.getBattery === 'function') {
+let _batteryObj = null;
+let _batteryPollTimer = null;
+
+async function inspectBattery() {
+  const isLocalHost = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+
+  // 1. If running on host/localhost, query the OS kernel directly for real physical telemetry
+  if (isLocalHost) {
     try {
-      const b = await navigator.getBattery();
-      const pct = Math.round(b.level * 100);
-      return `${pct}% ${b.charging ? '(⚡ Charging)' : '(🔋 Battery)'}`;
+      const hwPower = await apiRequest('/api/system/power-status');
+      if (hwPower && hwPower.supported) {
+        return {
+          supported: true,
+          pct: hwPower.pct,
+          charging: hwPower.charging,
+          chargingTime: hwPower.chargingTime,
+          dischargingTime: hwPower.dischargingTime,
+          timestamp: hwPower.reading_timestamp,
+          source: hwPower.source,
+        };
+      }
     } catch (_) {}
   }
-  return 'Not Available';
+
+  // 2. Browser Battery Status API for remote/mobile clients
+  if (typeof navigator.getBattery !== 'function') {
+    return {
+      supported: false,
+      pct: 'OS Privacy Restricted',
+      charging: 'Blocked by Mobile Policy (iOS / Android)',
+      chargingTime: 'Unavailable',
+      dischargingTime: 'Unavailable',
+      timestamp: new Date().toLocaleTimeString([], { hour12: false }),
+      source: 'W3C Privacy Spec (Anti-fingerprinting)',
+    };
+  }
+
+  try {
+    _batteryObj = await navigator.getBattery();
+
+    // Check if Chrome returned its hardcoded privacy stub: level 1.0, charging true, chargingTime 0
+    if (_batteryObj.level === 1.0 && _batteryObj.charging === true && _batteryObj.chargingTime === 0) {
+      try {
+        const hwPower = await apiRequest('/api/system/power-status');
+        if (hwPower && hwPower.supported) {
+          return {
+            supported: true,
+            pct: hwPower.pct,
+            charging: hwPower.charging,
+            chargingTime: hwPower.chargingTime,
+            dischargingTime: hwPower.dischargingTime,
+            timestamp: hwPower.reading_timestamp,
+            source: hwPower.source,
+          };
+        }
+      } catch (_) {}
+    }
+
+    const pct = Math.round(_batteryObj.level * 100);
+    const charging = _batteryObj.charging ? '⚡ Charging (AC/USB)' : '🔋 Discharging (Battery)';
+    const chargingTime = _batteryObj.chargingTime === Infinity || _batteryObj.chargingTime === 0 ? (_batteryObj.charging ? 'Fully charged / AC' : '0 min (Unplugged)') : `${Math.round(_batteryObj.chargingTime / 60)} min`;
+    const dischargingTime = _batteryObj.dischargingTime === Infinity ? (_batteryObj.charging ? 'Operating on AC' : 'Calculating...') : `${Math.round(_batteryObj.dischargingTime / 60)} min`;
+    const timestamp = new Date().toLocaleTimeString([], { hour12: false });
+
+    // Subscribe to live battery events if not already hooked
+    if (!TRACKING_STATE.batteryCleanup && _batteryObj) {
+      const onBatChange = () => {
+        inspectBattery().then((bat) => updateBatteryHud(bat));
+      };
+      _batteryObj.addEventListener('levelchange', onBatChange);
+      _batteryObj.addEventListener('chargingchange', onBatChange);
+      _batteryObj.addEventListener('chargingtimechange', onBatChange);
+      _batteryObj.addEventListener('dischargingtimechange', onBatChange);
+
+      if (!_batteryPollTimer) {
+        _batteryPollTimer = setInterval(() => {
+          inspectBattery().then((bat) => updateBatteryHud(bat));
+        }, 8000);
+      }
+
+      TRACKING_STATE.batteryCleanup = () => {
+        if (_batteryObj) {
+          _batteryObj.removeEventListener('levelchange', onBatChange);
+          _batteryObj.removeEventListener('chargingchange', onBatChange);
+          _batteryObj.removeEventListener('chargingtimechange', onBatChange);
+          _batteryObj.removeEventListener('dischargingtimechange', onBatChange);
+        }
+        if (_batteryPollTimer) {
+          clearInterval(_batteryPollTimer);
+          _batteryPollTimer = null;
+        }
+        TRACKING_STATE.batteryCleanup = null;
+      };
+    }
+
+    return {
+      supported: true,
+      pct: `${pct}%`,
+      charging,
+      chargingTime,
+      dischargingTime,
+      timestamp,
+      source: 'Hardware Battery API',
+    };
+  } catch (_) {
+    return {
+      supported: false,
+      pct: 'OS Privacy Restricted',
+      charging: 'Query restricted',
+      chargingTime: 'Unavailable',
+      dischargingTime: 'Unavailable',
+      timestamp: new Date().toLocaleTimeString([], { hour12: false }),
+      source: 'Mobile OS Privacy Guard',
+    };
+  }
 }
 
-let _deviceAlreadyAutoRegistered = false;
+function updateBatteryHud(bat) {
+  const pctEl = document.getElementById('hud-battery-pct');
+  const chgEl = document.getElementById('hud-battery-charging');
+  const ctEl = document.getElementById('hud-battery-charging-time');
+  const dtEl = document.getElementById('hud-battery-discharging-time');
+  const tsEl = document.getElementById('hud-battery-timestamp');
+  const lisEl = document.getElementById('hud-battery-listener');
+  const badge = document.getElementById('hud-battery-status-badge');
 
-async function autoInspectAndRegisterDevice(driverId, coords) {
-  if (_deviceAlreadyAutoRegistered) return;
-  _deviceAlreadyAutoRegistered = true;
-
-  const info = inspectClientHardware();
-  const battery = await getBatteryStatus();
-
-  // Populate HUD card
-  const panel = document.getElementById('driver-device-intel-panel');
-  const osEl = document.getElementById('intel-device-os');
-  const browserEl = document.getElementById('intel-browser-engine');
-  const resEl = document.getElementById('intel-screen-res');
-  const cpuEl = document.getElementById('intel-cpu-cores');
-  const batEl = document.getElementById('intel-battery');
-  const netEl = document.getElementById('intel-network');
-
-  if (osEl) osEl.textContent = `${info.os} (${info.deviceType})`;
-  if (browserEl) browserEl.textContent = info.browser;
-  if (resEl) resEl.textContent = info.screenRes;
-  if (cpuEl) cpuEl.textContent = info.cpuCores;
-  if (batEl) batEl.textContent = battery;
-  if (netEl) netEl.textContent = info.networkInfo;
-
-  if (panel) {
-    panel.style.display = 'block';
+  if (pctEl) pctEl.textContent = bat.pct;
+  if (chgEl) chgEl.textContent = bat.charging;
+  if (ctEl) ctEl.textContent = bat.chargingTime;
+  if (dtEl) dtEl.textContent = bat.dischargingTime;
+  if (tsEl) tsEl.textContent = bat.timestamp;
+  if (lisEl) lisEl.textContent = bat.supported && TRACKING_STATE.batteryCleanup ? 'Active (Live streaming)' : 'Inactive';
+  if (badge) {
+    badge.className = bat.supported ? 'badge badge-sm badge-success' : 'badge badge-sm badge-secondary';
+    badge.textContent = bat.supported ? 'API Supported' : 'Unsupported';
   }
+}
 
-  // Register device on backend automatically
-  try {
-    const regPayload = {
-      driver_id: driverId,
-      nickname: `${info.os} ${info.deviceType} (${info.browser})`,
-      os_family: info.os,
-      browser_family: info.browser,
-      platform: info.platform,
-      screen_res: `${window.screen.width}x${window.screen.height}`,
-      permission_status: 'granted',
-      capabilities: {
-        device_type: info.deviceType,
-        cpu_cores: navigator.hardwareConcurrency || null,
-        max_touch_points: info.touchPoints,
-        battery: battery,
-        network: info.networkInfo,
-        gps_accuracy: coords ? coords.accuracy : null,
-      },
+function inspectNetwork() {
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!conn) {
+    return {
+      supported: false,
+      effectiveType: 'Network API not supported',
+      downlink: 'Unavailable',
+      rtt: 'Unavailable',
+      saveData: 'Unavailable',
+      clientIp: window.location.hostname,
     };
-
-    await apiRequest('/devices/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(regPayload),
-    });
-
-    showToast(`Device Hardware Telemetry Auto-Registered: ${info.os} ${info.deviceType}`);
-    refreshAllData(true);
-  } catch (err) {
-    console.warn('Auto device registration notice:', err);
   }
+
+  const effectiveType = conn.effectiveType ? conn.effectiveType.toUpperCase() : 'Unknown';
+  const downlink = conn.downlink != null ? `${conn.downlink} Mbps` : 'Unavailable';
+  const rtt = conn.rtt != null ? `${conn.rtt} ms` : 'Unavailable';
+  const saveData = conn.saveData ? 'Enabled' : 'Disabled';
+
+  if (!TRACKING_STATE.networkCleanup) {
+    const onNetChange = () => {
+      const net = inspectNetwork();
+      updateNetworkHud(net);
+    };
+    conn.addEventListener('change', onNetChange);
+    TRACKING_STATE.networkCleanup = () => {
+      conn.removeEventListener('change', onNetChange);
+      TRACKING_STATE.networkCleanup = null;
+    };
+  }
+
+  return {
+    supported: true,
+    effectiveType,
+    downlink,
+    rtt,
+    saveData,
+    clientIp: window.location.hostname,
+  };
+}
+
+function updateNetworkHud(net) {
+  const typeEl = document.getElementById('hud-network-type');
+  const downEl = document.getElementById('hud-network-downlink');
+  const rttEl = document.getElementById('hud-network-rtt');
+  const saveEl = document.getElementById('hud-network-savedata');
+  const ipEl = document.getElementById('hud-network-ip');
+  const badge = document.getElementById('hud-network-status-badge');
+
+  if (typeEl) typeEl.textContent = net.effectiveType;
+  if (downEl) downEl.textContent = net.downlink;
+  if (rttEl) rttEl.textContent = net.rtt;
+  if (saveEl) saveEl.textContent = net.saveData;
+  if (ipEl) ipEl.textContent = net.clientIp;
+  if (badge) {
+    badge.className = net.supported ? 'badge badge-sm badge-success' : 'badge badge-sm badge-secondary';
+    badge.textContent = net.supported ? 'API Supported' : 'Unsupported';
+  }
+}
+
+function inspectCapabilities() {
+  return {
+    secureContext: window.isSecureContext === true,
+    geolocation: 'geolocation' in navigator,
+    batteryApi: typeof navigator.getBattery === 'function',
+    networkApi: Boolean(navigator.connection || navigator.mozConnection || navigator.webkitConnection),
+    cameraApi: Boolean(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'),
+  };
+}
+
+async function refreshAllHudCards() {
+  const hw = await inspectClientHardware();
+  const bat = await inspectBattery();
+  const net = inspectNetwork();
+  const cap = inspectCapabilities();
+
+  // Populate Device Card
+  const catEl = document.getElementById('hud-device-category');
+  const modelEl = document.getElementById('hud-device-model');
+  const osEl = document.getElementById('hud-device-os');
+  const browEl = document.getElementById('hud-device-browser');
+  const scEl = document.getElementById('hud-device-screen');
+  const cpuEl = document.getElementById('hud-device-cpu');
+  const touchEl = document.getElementById('hud-device-touch');
+  const tzEl = document.getElementById('hud-device-tz');
+
+  if (catEl) catEl.textContent = hw.deviceType;
+  if (modelEl) {
+    if (hw.model) {
+      modelEl.textContent = hw.model;
+      modelEl.className = 'hud-val hud-val-green';
+    } else {
+      modelEl.textContent = 'Device model unavailable through this browser.';
+      modelEl.className = 'hud-val hud-val-muted';
+    }
+  }
+  if (osEl) osEl.textContent = hw.osVersion ? `${hw.os} ${hw.osVersion}` : hw.os;
+  if (browEl) browEl.textContent = hw.browserVersion ? `${hw.browser} ${hw.browserVersion}` : hw.browser;
+  if (scEl) scEl.textContent = hw.screenRes;
+  if (cpuEl) cpuEl.textContent = hw.cpuCores;
+  if (touchEl) touchEl.textContent = hw.touchDesc;
+  if (tzEl) tzEl.textContent = `${hw.timeZone} (${hw.language})`;
+
+  // Populate Battery Card
+  updateBatteryHud(bat);
+
+  // Populate Network Card
+  updateNetworkHud(net);
+
+  // Populate Capabilities Card
+  const capSec = document.getElementById('hud-cap-secure');
+  const capGeo = document.getElementById('hud-cap-geo');
+  const capBat = document.getElementById('hud-cap-battery');
+  const capNet = document.getElementById('hud-cap-network');
+  const capCam = document.getElementById('hud-cap-camera');
+
+  if (capSec) {
+    capSec.textContent = cap.secureContext ? 'Detected (Active)' : 'Insecure (HTTP)';
+    capSec.className = cap.secureContext ? 'hud-val hud-val-green' : 'hud-val hud-val-amber';
+  }
+  if (capGeo) {
+    capGeo.textContent = cap.geolocation ? 'Supported' : 'Unsupported';
+    capGeo.className = cap.geolocation ? 'hud-val hud-val-green' : 'hud-val hud-val-muted';
+  }
+  if (capBat) {
+    capBat.textContent = cap.batteryApi ? 'Supported' : 'Not supported';
+    capBat.className = cap.batteryApi ? 'hud-val hud-val-green' : 'hud-val hud-val-muted';
+  }
+  if (capNet) {
+    capNet.textContent = cap.networkApi ? 'Supported' : 'Not supported';
+    capNet.className = cap.networkApi ? 'hud-val hud-val-green' : 'hud-val hud-val-muted';
+  }
+  if (capCam) {
+    capCam.textContent = cap.cameraApi ? 'Available (Hardware query)' : 'Unavailable';
+    capCam.className = cap.cameraApi ? 'hud-val hud-val-green' : 'hud-val hud-val-muted';
+  }
+
+  TRACKING_STATE.cachedDeviceInfo = hw;
+  return { hw, bat, net, cap };
 }
 
 function handleIncomingGpsFix(pos) {
-  // Auto-inspect and register device metadata upon location permission & first fix
-  if (TRACKING_STATE.activeDriverId && !_deviceAlreadyAutoRegistered) {
-    autoInspectAndRegisterDevice(TRACKING_STATE.activeDriverId, pos.coords);
-  }
+  updatePermissionBadge('granted');
+
   const coords = pos.coords;
   const lat = coords.latitude;
   const lng = coords.longitude;
   const accuracy = coords.accuracy;
+  const altitude = coords.altitude != null ? coords.altitude : null;
+  const altitudeAccuracy = coords.altitudeAccuracy != null ? coords.altitudeAccuracy : null;
   const speed = coords.speed != null ? coords.speed * 3.6 : null;
   const heading = coords.heading != null ? coords.heading : null;
   const deviceTimestamp = new Date(pos.timestamp).toISOString();
 
   TRACKING_STATE.fixCount += 1;
-  TRACKING_STATE.lastFix = { lat, lng, accuracy, speed, heading, deviceTimestamp };
+  TRACKING_STATE.lastFix = { lat, lng, accuracy, altitude, altitudeAccuracy, speed, heading, deviceTimestamp };
 
   // Update DOM displays
   const latEl = document.getElementById('disp-lat');
   const lngEl = document.getElementById('disp-lng');
   const accEl = document.getElementById('disp-acc');
   const speedEl = document.getElementById('disp-speed');
+  const altEl = document.getElementById('disp-alt');
+  const headEl = document.getElementById('disp-heading');
   const countEl = document.getElementById('disp-fixes-count');
   const pingEl = document.getElementById('disp-last-ping');
   const svWrap = document.getElementById('disp-streetview-wrap');
@@ -2134,6 +2631,8 @@ function handleIncomingGpsFix(pos) {
   if (lngEl) lngEl.textContent = lng.toFixed(6);
   if (accEl) accEl.textContent = `\u00B1${accuracy.toFixed(1)}m`;
   if (speedEl) speedEl.textContent = speed != null ? speed.toFixed(1) : '0.0';
+  if (altEl) altEl.textContent = altitude != null ? `${altitude.toFixed(1)} m` : '—';
+  if (headEl) headEl.textContent = heading != null ? `${heading.toFixed(0)}\u00B0` : '—';
   if (countEl) countEl.textContent = TRACKING_STATE.fixCount;
   if (pingEl) pingEl.textContent = new Date().toLocaleTimeString([], { hour12: false });
 
@@ -2146,24 +2645,31 @@ function handleIncomingGpsFix(pos) {
     `;
   }
 
-  // Stream coordinate to backend
+  // Stream coordinate to backend with throttling (min 1000ms between pings)
+  const now = Date.now();
   if (TRACKING_STATE.activeSessionId && TRACKING_STATE.activeDriverId) {
-    apiRequest('/tracking/location', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: TRACKING_STATE.activeSessionId,
-        driver_id: TRACKING_STATE.activeDriverId,
-        latitude: lat,
-        longitude: lng,
-        accuracy,
-        speed,
-        heading,
-        device_timestamp: deviceTimestamp,
-      }),
-    }).catch((err) => {
-      console.warn('GPS location ingestion warning:', err);
-    });
+    if (now - TRACKING_STATE.lastIngestedTimestamp >= 1000 || TRACKING_STATE.fixCount === 1) {
+      TRACKING_STATE.lastIngestedTimestamp = now;
+      apiRequest('/tracking/location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: TRACKING_STATE.activeSessionId,
+          driver_id: TRACKING_STATE.activeDriverId,
+          device_id: TRACKING_STATE.activeDeviceId,
+          latitude: lat,
+          longitude: lng,
+          accuracy,
+          altitude,
+          altitude_accuracy: altitudeAccuracy,
+          speed: coords.speed != null ? coords.speed : null,
+          heading,
+          device_timestamp: deviceTimestamp,
+        }),
+      }).catch((err) => {
+        console.warn('GPS location ingestion notice:', err);
+      });
+    }
   }
 
   // Update driver mini-map
@@ -2173,12 +2679,12 @@ function handleIncomingGpsFix(pos) {
     if (layers.marker) map.removeLayer(layers.marker);
     if (layers.circle) map.removeLayer(layers.circle);
 
-    const icon = createMapMarkerIcon('driver');
-    layers.marker = window.L.marker([lat, lng], { icon }).addTo(map);
+    const mapIcon = createMapMarkerIcon('driver');
+    layers.marker = window.L.marker([lat, lng], { icon: mapIcon }).addTo(map);
     layers.circle = window.L.circle([lat, lng], {
       radius: accuracy,
-      color: '#FFB000',
-      fillColor: '#FFB000',
+      color: '#00F0FF',
+      fillColor: '#00F0FF',
       fillOpacity: 0.15,
       weight: 1,
     }).addTo(map);
@@ -2190,13 +2696,16 @@ function handleIncomingGpsFix(pos) {
 function handleGpsError(err) {
   const badge = document.getElementById('gps-status-badge');
   let msg = 'Failed to acquire device GPS position.';
+
   if (err.code === 1) {
+    updatePermissionBadge('denied');
     msg = 'Location permission denied. Please allow location access in your browser address bar settings.';
     if (badge) {
       badge.textContent = 'PERMISSION DENIED';
       badge.className = 'status-badge status-conflict';
     }
   } else if (err.code === 2) {
+    updatePermissionBadge('unavailable');
     msg = 'GPS position unavailable. Ensure device location / GPS is turned ON in your phone settings.';
     if (badge) {
       badge.textContent = 'GPS UNAVAILABLE';
@@ -2225,34 +2734,95 @@ async function startDriverGpsTracking() {
     return;
   }
 
-  const deviceInput = document.getElementById('driver-device-info');
-  const deviceInfo = (deviceInput && deviceInput.value.trim()) || navigator.userAgent.slice(0, 80);
+  if (window.isSecureContext === false) {
+    showToast('Insecure Context (HTTP): Mobile browsers block GPS. Access via HTTPS or localhost.', true, 'INSECURE_CONTEXT');
+    const alertBox = document.getElementById('alert-insecure-context');
+    if (alertBox) alertBox.classList.remove('hidden');
+  }
+
+  // 1. Collect full client intelligence
+  const { hw, bat, net, cap } = await refreshAllHudCards();
+
+  const customNickname = document.getElementById('driver-device-info')?.value?.trim();
+  const nickname = customNickname || `${hw.os} ${hw.deviceType} (${hw.browser})`;
 
   try {
+    // 2. Register/update authenticated device profile
+    const clientToken = getOrCreateClientDeviceToken();
+    const regPayload = {
+      driver_id: driverId,
+      client_device_token: clientToken,
+      identity_confidence: clientToken.startsWith('FLT-DEV-EPH') ? 'ephemeral_fallback' : 'client_storage_token',
+      detection_limitations: 'Browser storage token. Private browsing generates isolated ephemeral token.',
+      nickname,
+      device_category: hw.deviceType,
+      model: hw.model,
+      os_family: hw.os,
+      os_version: hw.osVersion,
+      browser_family: hw.browser,
+      browser_version: hw.browserVersion,
+      platform: hw.platform,
+      screen_res: hw.screenRes,
+      permission_status: 'granted',
+      capabilities: {
+        device_type: hw.deviceType,
+        cpu_cores: navigator.hardwareConcurrency || null,
+        touch_points: navigator.maxTouchPoints || 0,
+        battery_pct: bat.pct,
+        battery_charging: bat.charging,
+        network_type: net.effectiveType,
+        downlink: net.downlink,
+        rtt: net.rtt,
+        secure_context: cap.secureContext,
+      },
+    };
+
+    const dev = await apiRequest('/devices/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(regPayload),
+    });
+
+    TRACKING_STATE.activeDeviceId = dev.device_id;
+    const regBadge = document.getElementById('hud-registered-badge');
+    if (regBadge) {
+      regBadge.className = 'badge badge-success';
+      regBadge.textContent = `Registered: ${dev.device_id}`;
+    }
+
+    // 3. Start tracking session
     const session = await apiRequest('/tracking/sessions/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         driver_id: driverId,
-        device_info: deviceInfo,
+        device_id: dev.device_id,
+        device_info: `${nickname} [${dev.device_id}]`,
       }),
     });
 
     TRACKING_STATE.activeSessionId = session.session_id;
     TRACKING_STATE.activeDriverId = driverId;
     TRACKING_STATE.fixCount = 0;
+    TRACKING_STATE.lastIngestedTimestamp = 0;
 
     const badge = document.getElementById('gps-status-badge');
     const startBtn = document.getElementById('btn-start-gps');
     const stopBtn = document.getElementById('btn-stop-gps');
+    const trackingBadge = document.getElementById('badge-tracking-state');
+
     if (badge) {
       badge.textContent = 'STREAMING LIVE';
       badge.className = 'status-badge status-live';
     }
+    if (trackingBadge) {
+      trackingBadge.textContent = 'GPS tracking active';
+      trackingBadge.className = 'badge badge-success';
+    }
     if (startBtn) startBtn.disabled = true;
     if (stopBtn) stopBtn.disabled = false;
 
-    // Start watching physical device location
+    // 4. Start watching physical device location
     TRACKING_STATE.watchId = navigator.geolocation.watchPosition(
       handleIncomingGpsFix,
       handleGpsError,
@@ -2263,7 +2833,7 @@ async function startDriverGpsTracking() {
       }
     );
 
-    showToast(`GPS Tracking started for session #${session.session_id}`);
+    showToast(`GPS Tracking started: session #${session.session_id} (${dev.device_id})`);
   } catch (err) {
     showGlobalError(err.code || 'GPS_START_ERROR', err.message);
   }
@@ -2273,6 +2843,14 @@ async function stopDriverGpsTracking() {
   if (TRACKING_STATE.watchId != null) {
     navigator.geolocation.clearWatch(TRACKING_STATE.watchId);
     TRACKING_STATE.watchId = null;
+  }
+
+  // Clean up battery & network listeners
+  if (TRACKING_STATE.batteryCleanup) {
+    TRACKING_STATE.batteryCleanup();
+  }
+  if (TRACKING_STATE.networkCleanup) {
+    TRACKING_STATE.networkCleanup();
   }
 
   if (TRACKING_STATE.activeSessionId) {
@@ -2293,9 +2871,15 @@ async function stopDriverGpsTracking() {
   const badge = document.getElementById('gps-status-badge');
   const startBtn = document.getElementById('btn-start-gps');
   const stopBtn = document.getElementById('btn-stop-gps');
+  const trackingBadge = document.getElementById('badge-tracking-state');
+
   if (badge) {
     badge.textContent = 'STOPPED';
     badge.className = 'status-badge status-inactive';
+  }
+  if (trackingBadge) {
+    trackingBadge.textContent = 'GPS tracking stopped';
+    trackingBadge.className = 'badge status-inactive';
   }
   if (startBtn) startBtn.disabled = false;
   if (stopBtn) stopBtn.disabled = true;
@@ -2904,6 +3488,12 @@ function setupEventListeners() {
   document.getElementById('btn-copy-share-url')?.addEventListener('click', copyShareUrl);
   document.getElementById('btn-hero-dispatch')?.addEventListener('click', () => switchView('dispatch'));
   document.getElementById('btn-hero-radar')?.addEventListener('click', () => switchView('vehicle-tracking'));
+  document.querySelectorAll('.share-target-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const target = e.currentTarget.getAttribute('data-share-target');
+      if (target) setShareTarget(target);
+    });
+  });
 
   // Device Inventory listeners
   document.getElementById('btn-open-register-device')?.addEventListener('click', openRegisterDeviceModal);
@@ -2913,6 +3503,16 @@ function setupEventListeners() {
     showToast('Device Inventory refreshed');
   });
   document.getElementById('form-device-register')?.addEventListener('submit', submitRegisterDevice);
+  document.getElementById('btn-autodetect-device')?.addEventListener('click', () => {
+    const hw = inspectHardware();
+    const nickEl = document.getElementById('dev-reg-nickname');
+    const osEl = document.getElementById('dev-reg-os');
+    const brEl = document.getElementById('dev-reg-browser');
+    if (nickEl) nickEl.value = `${hw.os} ${hw.deviceType} (${hw.browser})`;
+    if (osEl) osEl.value = hw.os;
+    if (brEl) brEl.value = hw.browser;
+    showToast('Device hardware attributes auto-detected and populated.');
+  });
   document.getElementById('form-phone-verify')?.addEventListener('submit', submitPhoneVerification);
 
   // Theme & Shortcuts
@@ -2954,37 +3554,63 @@ function setupEventListeners() {
 
 /* ==================== SHARE LINK & QR CODE ==================== */
 let _qrInstance = null;
+let _cachedNetInfo = null;
+let _currentShareTarget = 'lan-https';
 
 async function openShareModal() {
   try {
-    let lanUrl = window.location.origin;
     try {
-      const net = await apiRequest('/network-info');
-      if (net && net.lan_url) {
-        lanUrl = net.lan_url;
-      }
-    } catch (_) {}
-
-    const input = document.getElementById('share-lan-url');
-    if (input) input.value = lanUrl;
-
-    const qrContainer = document.getElementById('share-qr-container');
-    if (qrContainer && window.QRCode) {
-      qrContainer.innerHTML = '';
-      _qrInstance = new window.QRCode(qrContainer, {
-        text: lanUrl,
-        width: 190,
-        height: 190,
-        colorDark: '#07090E',
-        colorLight: '#FFFFFF',
-        correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 2,
-      });
+      _cachedNetInfo = await apiRequest('/network-info');
+    } catch (_) {
+      _cachedNetInfo = {
+        local_ip: window.location.hostname,
+        lan_url: `http://${window.location.hostname}:8000`,
+        lan_https_url: `https://${window.location.hostname}:8443`,
+        localhost_url: 'http://127.0.0.1:8000',
+      };
     }
 
+    setShareTarget(_currentShareTarget);
     openModal('modal-share-link');
   } catch (err) {
     console.warn('Error opening share modal:', err);
     openModal('modal-share-link');
+  }
+}
+
+function setShareTarget(target) {
+  _currentShareTarget = target;
+  let targetUrl = window.location.origin;
+
+  if (_cachedNetInfo) {
+    if (target === 'lan-https') {
+      targetUrl = _cachedNetInfo.lan_https_url || `https://${_cachedNetInfo.local_ip}:8443`;
+    } else if (target === 'lan-http') {
+      targetUrl = _cachedNetInfo.lan_url || `http://${_cachedNetInfo.local_ip}:8000`;
+    } else if (target === 'localhost') {
+      targetUrl = _cachedNetInfo.localhost_url || 'http://127.0.0.1:8000';
+    }
+  }
+
+  // Update active button state
+  document.querySelectorAll('.share-target-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-share-target') === target);
+  });
+
+  const input = document.getElementById('share-lan-url');
+  if (input) input.value = targetUrl;
+
+  const qrContainer = document.getElementById('share-qr-container');
+  if (qrContainer && window.QRCode) {
+    qrContainer.innerHTML = '';
+    _qrInstance = new window.QRCode(qrContainer, {
+      text: targetUrl,
+      width: 190,
+      height: 190,
+      colorDark: '#07090E',
+      colorLight: '#FFFFFF',
+      correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 2,
+    });
   }
 }
 
@@ -3018,6 +3644,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   hydrateStaticIcons();
   setupEventListeners();
   initNetworkInfoBanner();
+  initGpsContextStatus();
   setupSSE();
   await refreshAllData(true);
 

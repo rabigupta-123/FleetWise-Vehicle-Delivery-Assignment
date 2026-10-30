@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import os
 import re
 import secrets
 import tempfile
@@ -22,6 +23,26 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from app.advisor import get_dispatch_next_delivery, get_recommendations_for_delivery
+from app.analytics.accuracy_engine import (
+    calculate_data_completeness,
+    calculate_freshness_score,
+    calculate_gps_quality_score,
+    calculate_movement_consistency,
+    calculate_telemetry_quality_score,
+)
+from app.analytics.confidence_engine import (
+    evaluate_assignment_confidence,
+    evaluate_device_identity_confidence,
+    evaluate_location_confidence,
+)
+from app.analytics.deep_analysis import (
+    analyze_delivery_performance,
+    analyze_driver_performance,
+    analyze_driver_utilization,
+    analyze_fleet_utilization,
+    analyze_vehicle_performance,
+    detect_operational_anomalies,
+)
 from app.auth import (
     DEFAULT_USERS,
     check_permission,
@@ -54,6 +75,7 @@ from app.schemas import (
     DeliveryCreate,
     DeliveryStatusPatch,
     DeviceRegisterRequest,
+    DeviceRenameRequest,
     DeviceRevokeRequest,
     DriverCreate,
     DriverPhonePatch,
@@ -69,6 +91,7 @@ from app.schemas import (
 from app.telematics import (
     compute_freshness_status,
     evaluate_telemetry_step,
+    evaluate_timestamp_validity,
     haversine_distance_meters,
     normalize_phone_number,
 )
@@ -210,6 +233,7 @@ def health_check():
 def get_network_info():
     import socket
     ip = "127.0.0.1"
+    usable = []
     try:
         _, _, ips = socket.gethostbyname_ex(socket.gethostname())
         # Filter loopback and APIPA
@@ -232,14 +256,40 @@ def get_network_info():
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
+            usable = [ip]
         except Exception:
             ip = "127.0.0.1"
+            usable = ["127.0.0.1"]
+
+    has_ssl = os.path.exists("certs/cert.pem") and os.path.exists("certs/key.pem")
+    cert_info = {}
+    if has_ssl:
+        try:
+            from scripts.generate_ssl_certs import TRUST_INSTRUCTIONS, inspect_cert
+            cert_info = inspect_cert("certs/cert.pem")
+            cert_info["trust_guide"] = TRUST_INSTRUCTIONS
+        except Exception:
+            pass
+
     return {
         "local_ip": ip,
+        "all_lan_ips": usable,
         "port": 8000,
+        "https_port": 8443,
         "lan_url": f"http://{ip}:8000",
+        "lan_https_url": f"https://{ip}:8443",
         "localhost_url": "http://127.0.0.1:8000",
+        "localhost_https_url": "https://127.0.0.1:8443",
+        "has_ssl_certs": has_ssl,
+        "cert_details": cert_info,
+        "secure_context_hint": "Modern mobile browsers require HTTPS (:8443) or a secure public tunnel to grant GPS location permission.",
     }
+
+
+@app.get("/api/system/power-status")
+def get_system_power_status():
+    from app.power import get_hardware_power_status
+    return get_hardware_power_status()
 
 
 @app.get("/metrics")
@@ -352,7 +402,7 @@ def list_vehicles():
 @app.post("/vehicles", status_code=201)
 def create_vehicle(body: VehicleCreate, request: Request):
     user = get_current_user(request)
-    check_permission(user, "vehicles")
+    check_permission(user, "vehicles", request=request)
     actor = user["username"] if user else "operator"
 
     norm_reg = body.registration_no.strip().upper()
@@ -406,7 +456,7 @@ def create_vehicle(body: VehicleCreate, request: Request):
 @app.patch("/vehicles/{vehicle_id}/status")
 def patch_vehicle_status(vehicle_id: str, body: VehicleStatusPatch, request: Request):
     user = get_current_user(request)
-    check_permission(user, "vehicles")
+    check_permission(user, "vehicles", request=request)
     actor = user["username"] if user else "operator"
 
     # State-bypass check: vehicles can never be patched directly to assigned or in_transit
@@ -461,7 +511,7 @@ def list_drivers():
 @app.post("/drivers", status_code=201)
 def create_driver(body: DriverCreate, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     with immediate_transaction() as conn:
@@ -514,7 +564,7 @@ def create_driver(body: DriverCreate, request: Request):
 @app.patch("/drivers/{driver_id}/status")
 def patch_driver_status(driver_id: str, body: DriverStatusPatch, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     # State-bypass check: drivers can never be patched directly to assigned or in_transit
@@ -550,7 +600,7 @@ def patch_driver_status(driver_id: str, body: DriverStatusPatch, request: Reques
 @app.patch("/drivers/{driver_id}/phone")
 def patch_driver_phone(driver_id: str, body: DriverPhonePatch, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     clean_phone = body.phone.strip()
@@ -589,7 +639,7 @@ def patch_driver_phone(driver_id: str, body: DriverPhonePatch, request: Request)
 @app.post("/drivers/{driver_id}/phone/request-verification")
 def request_driver_phone_verification(driver_id: str, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     with immediate_transaction() as conn:
@@ -657,7 +707,7 @@ def request_driver_phone_verification(driver_id: str, request: Request):
 @app.post("/drivers/{driver_id}/phone/verify")
 def verify_driver_phone(driver_id: str, body: PhoneVerifyCodeRequest, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     with immediate_transaction() as conn:
@@ -790,7 +840,7 @@ def list_deliveries(status: Optional[str] = Query(None), q: Optional[str] = Quer
 @app.post("/deliveries", status_code=201)
 def create_delivery(body: DeliveryCreate, request: Request):
     user = get_current_user(request)
-    check_permission(user, "deliveries")
+    check_permission(user, "deliveries", request=request)
     actor = user["username"] if user else "operator"
 
     with immediate_transaction() as conn:
@@ -913,7 +963,7 @@ def get_blocked_queue():
 @app.post("/deliveries/auto-assign")
 def auto_assign_all(dry_run: bool = Query(True), request: Request = None):
     user = get_current_user(request)
-    check_permission(user, "assign")
+    check_permission(user, "assign", request=request)
     actor = user["username"] if user else "operator"
 
     with read_conn() as conn:
@@ -1010,7 +1060,7 @@ def assign_delivery(
     Supports Idempotency-Key and If-Match stale-state protection.
     """
     user = get_current_user(request) if request else None
-    check_permission(user, "assign")
+    check_permission(user, "assign", request=request)
     actor = user["username"] if user else "operator"
 
     idempotency_key = request.headers.get("Idempotency-Key") if request else None
@@ -1200,7 +1250,7 @@ def patch_delivery_status(
     request: Request = None,
 ):
     user = get_current_user(request) if request else None
-    check_permission(user, "status")
+    check_permission(user, "status", request=request)
     actor = user["username"] if user else "operator"
 
     idempotency_key = request.headers.get("Idempotency-Key") if request else None
@@ -1357,7 +1407,7 @@ def download_template(entity: str):
 @app.post("/import/{entity}")
 async def import_entity(entity: str, dry_run: bool = Query(True), file: UploadFile = File(...), request: Request = None):
     user = get_current_user(request) if request else None
-    check_permission(user, "import")
+    check_permission(user, "import", request=request)
     actor = user["username"] if user else "operator"
 
     ent = entity.strip().lower()
@@ -1583,6 +1633,212 @@ def get_analytics_summary():
     }
 
 
+@app.get("/analytics/overview")
+def get_analytics_overview():
+    """Executive operational overview combining fleet, driver, and delivery KPIs."""
+    with read_conn() as conn:
+        fleet = analyze_fleet_utilization(conn)
+        drivers = analyze_driver_utilization(conn)
+        deliveries = analyze_delivery_performance(conn)
+        anomalies = detect_operational_anomalies(conn, limit=5)
+
+    return {
+        "fleet": fleet,
+        "drivers": drivers,
+        "deliveries": deliveries,
+        "recent_anomalies_count": len(anomalies),
+        "recent_anomalies": anomalies,
+        "timestamp": utc_now_iso(),
+    }
+
+
+@app.get("/analytics/fleet")
+def get_fleet_analytics():
+    """Fleet utilization breakdown and operational performance per vehicle."""
+    with read_conn() as conn:
+        utilization = analyze_fleet_utilization(conn)
+        vehicles = analyze_vehicle_performance(conn)
+    return {
+        "utilization": utilization,
+        "vehicles": vehicles,
+        "timestamp": utc_now_iso(),
+    }
+
+
+@app.get("/analytics/drivers")
+def get_driver_analytics():
+    """Driver utilization and individual performance metrics."""
+    with read_conn() as conn:
+        utilization = analyze_driver_utilization(conn)
+        drivers = analyze_driver_performance(conn)
+    return {
+        "utilization": utilization,
+        "drivers": drivers,
+        "timestamp": utc_now_iso(),
+    }
+
+
+@app.get("/analytics/deliveries")
+def get_delivery_analytics():
+    """Comprehensive delivery completion and on-time performance breakdown."""
+    with read_conn() as conn:
+        perf = analyze_delivery_performance(conn)
+    return {**perf, "timestamp": utc_now_iso()}
+
+
+@app.get("/analytics/telemetry")
+def get_telemetry_analytics():
+    """Aggregated telemetry volume, quality distribution, and kinematics statistics."""
+    with read_conn() as conn:
+        stats = conn.execute(
+            """
+            SELECT 
+                COUNT(*) as total_fixes,
+                COUNT(DISTINCT session_id) as total_sessions,
+                COUNT(DISTINCT driver_id) as drivers_tracked,
+                AVG(CASE WHEN accuracy IS NOT NULL THEN accuracy ELSE NULL END) as avg_accuracy_m,
+                SUM(CASE WHEN is_implausible_jump = 1 THEN 1 ELSE 0 END) as jump_anomalies,
+                SUM(CASE WHEN quality_flag = 'accepted' THEN 1 ELSE 0 END) as accepted_fixes,
+                SUM(CASE WHEN quality_flag = 'low_accuracy' THEN 1 ELSE 0 END) as low_accuracy_fixes,
+                SUM(CASE WHEN quality_flag = 'stale' THEN 1 ELSE 0 END) as stale_fixes,
+                SUM(CASE WHEN quality_flag = 'out_of_order' THEN 1 ELSE 0 END) as out_of_order_fixes,
+                SUM(CASE WHEN quality_flag = 'duplicate' THEN 1 ELSE 0 END) as duplicate_fixes
+            FROM gps_locations
+            """
+        ).fetchone()
+
+        recent_fixes = [dict(r) for r in conn.execute(
+            "SELECT location_id, session_id, driver_id, vehicle_id, latitude, longitude, accuracy, speed, quality_flag, server_timestamp FROM gps_locations ORDER BY server_timestamp DESC LIMIT 10"
+        ).fetchall()]
+
+    return {
+        "summary": dict(stats),
+        "recent_fixes": recent_fixes,
+        "timestamp": utc_now_iso(),
+    }
+
+
+@app.get("/analytics/accuracy")
+def get_accuracy_analytics():
+    """Calculates granular Telemetry Quality Scores across active tracking sessions."""
+    with read_conn() as conn:
+        sessions = conn.execute(
+            "SELECT session_id, driver_id, vehicle_id, status FROM tracking_sessions ORDER BY started_at DESC LIMIT 10"
+        ).fetchall()
+
+        session_scores = []
+        for s in sessions:
+            sid = s["session_id"]
+            rows = conn.execute(
+                "SELECT * FROM gps_locations WHERE session_id = ? ORDER BY server_timestamp DESC LIMIT 2",
+                (sid,),
+            ).fetchall()
+            if rows:
+                curr = dict(rows[0])
+                prev = dict(rows[1]) if len(rows) > 1 else None
+                score_data = calculate_telemetry_quality_score(curr, prev)
+                session_scores.append({
+                    "session_id": sid,
+                    "driver_id": s["driver_id"],
+                    "vehicle_id": s["vehicle_id"],
+                    "status": s["status"],
+                    "telemetry_quality": score_data,
+                })
+
+    return {
+        "sessions_analyzed": len(session_scores),
+        "session_scores": session_scores,
+        "formula_description": "Telemetry Quality Score = 0.40 * GPS Quality + 0.30 * Freshness + 0.20 * Movement + 0.10 * Completeness",
+        "timestamp": utc_now_iso(),
+    }
+
+
+@app.get("/analytics/confidence")
+def get_confidence_analytics():
+    """Calculates Evidence Confidence Scores across device identity and active fleet assignments."""
+    with read_conn() as conn:
+        # 1. Device identity confidence
+        dev_rows = conn.execute(
+            "SELECT d.*, dr.phone_verification_status FROM devices d JOIN drivers dr ON dr.driver_id = d.driver_id ORDER BY d.last_seen_at DESC LIMIT 15"
+        ).fetchall()
+        device_evals = []
+        for d in dev_rows:
+            conf = evaluate_device_identity_confidence(
+                is_authenticated=True,
+                has_registered_device=True,
+                is_revoked=bool(d["is_revoked"]),
+                token_type=d["identity_confidence"],
+                phone_verified=d["phone_verification_status"] == "verified",
+                driver_id_match=True,
+            )
+            device_evals.append({
+                "device_id": d["device_id"],
+                "driver_id": d["driver_id"],
+                "nickname": d["nickname"],
+                "confidence": conf,
+            })
+
+        # 2. Assignment confidence for pending deliveries
+        pending_dels = conn.execute("SELECT * FROM deliveries WHERE status = 'pending' LIMIT 5").fetchall()
+        assignment_evals = []
+        for d in pending_dels:
+            recs = get_recommendations_for_delivery(conn, d["delivery_id"], top_k=1)
+            if recs:
+                top = recs[0]
+                conf = evaluate_assignment_confidence(
+                    vehicle=top["vehicle"],
+                    driver=top["driver"],
+                    delivery=dict(d),
+                    has_active_vehicle_assignment=False,
+                    has_active_driver_assignment=False,
+                )
+                assignment_evals.append({
+                    "delivery_id": d["delivery_id"],
+                    "recommended_pair": {"vehicle_id": top["vehicle"]["vehicle_id"], "driver_id": top["driver"]["driver_id"]},
+                    "confidence": conf,
+                })
+
+    return {
+        "device_identity_confidence": device_evals,
+        "assignment_confidence": assignment_evals,
+        "label": "Evidence Confidence Score — Heuristic",
+        "timestamp": utc_now_iso(),
+    }
+
+
+@app.get("/analytics/anomalies")
+def get_anomalies_analytics(limit: int = Query(50, ge=1, le=200)):
+    """Retrieves operational and kinematic anomalies detected across telemetry and events."""
+    with read_conn() as conn:
+        anomalies = detect_operational_anomalies(conn, limit=limit)
+    return {
+        "anomalies_count": len(anomalies),
+        "anomalies": anomalies,
+        "timestamp": utc_now_iso(),
+    }
+
+
+@app.get("/analytics/vehicles/{vehicle_id}")
+def get_single_vehicle_analytics(vehicle_id: str):
+    """Detailed operational metrics and telemetry stats for a single vehicle."""
+    with read_conn() as conn:
+        res = analyze_vehicle_performance(conn, vehicle_id=vehicle_id)
+        if not res:
+            raise AppError(404, "NOT_FOUND", f"Vehicle '{vehicle_id}' not found.")
+    return res[0]
+
+
+@app.get("/analytics/drivers/{driver_id}")
+def get_single_driver_analytics(driver_id: str):
+    """Detailed operational metrics and delivery performance for a single driver."""
+    with read_conn() as conn:
+        res = analyze_driver_performance(conn, driver_id=driver_id)
+        if not res:
+            raise AppError(404, "NOT_FOUND", f"Driver '{driver_id}' not found.")
+    return res[0]
+
+
+
 @app.get("/deliveries/routes")
 def get_routes():
     with read_conn() as conn:
@@ -1607,7 +1863,7 @@ def get_routes():
 @app.post("/devices/register", status_code=201)
 def register_device(body: DeviceRegisterRequest, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     client_ip = request.client.host if request.client else "127.0.0.1"
@@ -1617,25 +1873,117 @@ def register_device(body: DeviceRegisterRequest, request: Request):
         if not drv:
             raise AppError(404, "NOT_FOUND", f"Driver '{body.driver_id}' not found.")
 
-        device_id = f"DEV-{uuid.uuid4().hex[:8].upper()}"
         now_str = utc_now_iso()
         caps_str = json.dumps(body.capabilities or {})
+
+        # 1. Reject if this persistent client token was permanently revoked
+        if body.client_device_token:
+            rev_row = conn.execute(
+                "SELECT device_id FROM devices WHERE client_device_token = ? AND is_revoked = 1",
+                (body.client_device_token,),
+            ).fetchone()
+            if rev_row:
+                raise AppError(403, "DEVICE_REVOKED", f"Device '{rev_row['device_id']}' has been permanently revoked.")
+
+        # 2. Check for existing active device:
+        # Prioritize persistent client_device_token (differentiates multiple physical phones of the same driver)
+        existing = None
+        if body.client_device_token:
+            existing = conn.execute(
+                "SELECT * FROM devices WHERE client_device_token = ? AND is_revoked = 0 ORDER BY registered_at DESC LIMIT 1",
+                (body.client_device_token,),
+            ).fetchone()
+        if not existing:
+            existing = conn.execute(
+                """
+                SELECT * FROM devices 
+                WHERE driver_id = ? AND nickname = ? AND is_revoked = 0 
+                ORDER BY registered_at DESC LIMIT 1
+                """,
+                (body.driver_id, body.nickname),
+            ).fetchone()
+
+        confidence = body.identity_confidence or ("client_storage_token" if body.client_device_token else "ephemeral_session")
+        limitations = body.detection_limitations or "Browser storage token. Private browsing or clearing storage resets token."
+
+        if existing:
+            device_id = existing["device_id"]
+            conn.execute(
+                """
+                UPDATE devices 
+                SET driver_id = ?, nickname = ?, last_seen_at = ?, last_ip = ?, capabilities_json = ?, permission_status = ?,
+                    device_category = COALESCE(?, device_category),
+                    model = COALESCE(?, model),
+                    os_family = COALESCE(?, os_family),
+                    os_version = COALESCE(?, os_version),
+                    browser_family = COALESCE(?, browser_family),
+                    browser_version = COALESCE(?, browser_version),
+                    platform = COALESCE(?, platform),
+                    screen_res = COALESCE(?, screen_res),
+                    client_device_token = COALESCE(?, client_device_token),
+                    identity_confidence = ?,
+                    detection_limitations = ?
+                WHERE device_id = ?
+                """,
+                (
+                    body.driver_id, body.nickname, now_str, client_ip, caps_str, body.permission_status,
+                    body.device_category, body.model, body.os_family, body.os_version,
+                    body.browser_family, body.browser_version, body.platform, body.screen_res,
+                    body.client_device_token, confidence, limitations,
+                    device_id,
+                ),
+            )
+            device_profile = {
+                "device_id": device_id,
+                "driver_id": body.driver_id,
+                "driver_name": drv["name"],
+                "nickname": body.nickname,
+                "device_category": body.device_category or existing["device_category"],
+                "model": body.model or existing["model"],
+                "os_family": body.os_family or existing["os_family"],
+                "os_version": body.os_version or existing["os_version"],
+                "browser_family": body.browser_family or existing["browser_family"],
+                "browser_version": body.browser_version or existing["browser_version"],
+                "platform": body.platform or existing["platform"],
+                "screen_res": body.screen_res or existing["screen_res"],
+                "client_device_token": body.client_device_token or existing["client_device_token"],
+                "identity_confidence": confidence,
+                "detection_limitations": limitations,
+                "capabilities": body.capabilities or {},
+                "permission_status": body.permission_status,
+                "last_ip": client_ip,
+                "registered_at": existing["registered_at"],
+                "last_seen_at": now_str,
+                "is_revoked": False,
+                "is_reused": True,
+            }
+            write_audit(conn, actor=actor, action="update_device_registration", entity="device", entity_id=device_id, after=device_profile)
+            broadcast_event("device_updated", device_profile)
+            return device_profile
+
+        device_id = f"DEV-{uuid.uuid4().hex[:8].upper()}"
 
         conn.execute(
             """
             INSERT INTO devices (
-                device_id, driver_id, nickname, os_family, browser_family,
+                device_id, driver_id, nickname, device_category, model,
+                os_family, os_version, browser_family, browser_version,
                 platform, screen_res, capabilities_json, permission_status,
-                last_ip, registered_at, last_seen_at, is_revoked
+                last_ip, registered_at, last_seen_at, is_revoked,
+                client_device_token, identity_confidence, detection_limitations
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
             """,
             (
                 device_id,
                 body.driver_id,
                 body.nickname,
+                body.device_category,
+                body.model,
                 body.os_family,
+                body.os_version,
                 body.browser_family,
+                body.browser_version,
                 body.platform,
                 body.screen_res,
                 caps_str,
@@ -1643,6 +1991,9 @@ def register_device(body: DeviceRegisterRequest, request: Request):
                 client_ip,
                 now_str,
                 now_str,
+                body.client_device_token,
+                confidence,
+                limitations,
             ),
         )
 
@@ -1651,10 +2002,17 @@ def register_device(body: DeviceRegisterRequest, request: Request):
             "driver_id": body.driver_id,
             "driver_name": drv["name"],
             "nickname": body.nickname,
+            "device_category": body.device_category,
+            "model": body.model,
             "os_family": body.os_family,
+            "os_version": body.os_version,
             "browser_family": body.browser_family,
+            "browser_version": body.browser_version,
             "platform": body.platform,
             "screen_res": body.screen_res,
+            "client_device_token": body.client_device_token,
+            "identity_confidence": confidence,
+            "detection_limitations": limitations,
             "capabilities": body.capabilities or {},
             "permission_status": body.permission_status,
             "last_ip": client_ip,
@@ -1744,10 +2102,33 @@ def get_device_details(device_id: str):
         return dev
 
 
+@app.patch("/devices/{device_id}/rename")
+def rename_device(device_id: str, body: DeviceRenameRequest, request: Request):
+    user = get_current_user(request)
+    check_permission(user, "drivers", request=request)
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Device '{device_id}' not found.")
+        dev = dict(row)
+        if dev["is_revoked"]:
+            raise AppError(403, "DEVICE_REVOKED", f"Device '{device_id}' is revoked and cannot be renamed.")
+
+        conn.execute("UPDATE devices SET nickname = ? WHERE device_id = ?", (body.nickname, device_id))
+        after = {**dev, "nickname": body.nickname}
+        write_audit(conn, actor=actor, action="rename_device", entity="device", entity_id=device_id, before=dev, after=after)
+
+    broadcast_event("device_renamed", after)
+    return after
+
+
+
 @app.post("/devices/{device_id}/revoke")
 def revoke_device(device_id: str, request: Request, body: Optional[DeviceRevokeRequest] = None):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     with immediate_transaction() as conn:
@@ -1810,7 +2191,7 @@ def make_street_view_url(lat: Optional[float], lng: Optional[float]) -> Optional
 @app.post("/tracking/sessions/start", status_code=201)
 def start_tracking_session(body: TrackingSessionStart, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     with immediate_transaction() as conn:
@@ -1879,7 +2260,7 @@ def start_tracking_session(body: TrackingSessionStart, request: Request):
 @app.post("/tracking/sessions/stop")
 def stop_tracking_session(body: TrackingSessionStop, request: Request):
     user = get_current_user(request)
-    check_permission(user, "drivers")
+    check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
 
     with immediate_transaction() as conn:
@@ -1909,18 +2290,25 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         if not sess_row:
             raise AppError(404, "NOT_FOUND", f"Tracking session '{body.session_id}' not found.")
         session = dict(sess_row)
+        driver_id = session["driver_id"]
 
-        # Check device revocation if linked
+        # Prevent spoofing telemetry under another driver's identity
+        if body.driver_id and body.driver_id != driver_id:
+            raise AppError(403, "DRIVER_MISMATCH", f"Telemetry driver '{body.driver_id}' does not match session driver '{driver_id}'.")
+
+        # Check device authorization & ownership (must precede session status check so revoked devices get 403)
         device_id = body.device_id or session.get("device_id")
         if device_id:
-            dev_row = conn.execute("SELECT is_revoked FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-            if dev_row and dev_row["is_revoked"]:
+            dev_row = conn.execute("SELECT driver_id, is_revoked FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+            if not dev_row:
+                raise AppError(404, "NOT_FOUND", f"Device '{device_id}' not found.")
+            if dev_row["is_revoked"]:
                 raise AppError(403, "DEVICE_REVOKED", "The device associated with this tracking session has been revoked.")
+            if dev_row["driver_id"] != driver_id:
+                raise AppError(403, "DEVICE_DRIVER_MISMATCH", f"Device '{device_id}' is registered to another driver.")
 
         if session["status"] != "active":
             raise AppError(400, "SESSION_INACTIVE", f"Tracking session '{body.session_id}' is currently '{session['status']}'.")
-
-        driver_id = session["driver_id"]
 
         # Anti-flooding rate limit (minimum 0.8s between fixes per session)
         last_fix = conn.execute(
@@ -1935,17 +2323,30 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         ).fetchone()
 
         now_str = utc_now_iso()
+        now_dt = datetime.now(timezone.utc)
+        ts_validity = evaluate_timestamp_validity(body.device_timestamp, now_str)
+
         if last_fix:
+            try:
+                prev_srv_dt = datetime.fromisoformat(last_fix["server_timestamp"].replace("Z", "+00:00"))
+                delta_srv_s = (now_dt - prev_srv_dt).total_seconds()
+            except Exception:
+                delta_srv_s = 999.0
+
             try:
                 prev_dev_ts = datetime.fromisoformat(last_fix["device_timestamp"].replace("Z", "+00:00"))
                 curr_dev_ts = datetime.fromisoformat(body.device_timestamp.replace("Z", "+00:00"))
                 delta_dev_s = (curr_dev_ts - prev_dev_ts).total_seconds()
-                if delta_dev_s < 0.8:
-                    raise AppError(429, "RATE_LIMITED", "GPS update throttled: minimum interval between fixes is 1 second.")
-            except ValueError:
-                pass
-            except ValueError:
-                pass
+            except Exception:
+                delta_dev_s = delta_srv_s
+
+            # 1. Duplicate device submission with identical timestamp and coordinates
+            if delta_dev_s == 0.0 and abs(body.latitude - last_fix["latitude"]) < 0.00001 and abs(body.longitude - last_fix["longitude"]) < 0.00001:
+                raise AppError(409, "DUPLICATE_FIX", "Duplicate GPS fix detected with identical timestamp and coordinates.")
+
+            # 2. Device clock rate limit throttled (minimum 0.8s interval between sequential fixes)
+            if 0.0 <= delta_dev_s < 0.8:
+                raise AppError(429, "RATE_LIMITED", "GPS update throttled: minimum interval between fixes is 1 second.")
 
         # Re-verify active vehicle & delivery assignment
         asg_row = conn.execute(
@@ -1956,7 +2357,7 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         vehicle_id = asg_row["vehicle_id"] if asg_row else session.get("vehicle_id")
         delivery_id = asg_row["delivery_id"] if asg_row else session.get("delivery_id")
 
-        # Evaluate step kinematics and jump detection
+        # Evaluate step kinematics, jump detection, and timestamp anomalies
         if last_fix:
             prev_fix = dict(last_fix)
             prev_ts = prev_fix["device_timestamp"] if prev_fix.get("device_timestamp") else prev_fix["server_timestamp"]
@@ -1969,15 +2370,17 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
                 body.longitude,
                 curr_ts,
                 body.speed,
+                accuracy_m=body.accuracy,
             )
         else:
+            quality = "low_accuracy" if body.accuracy > 150.0 else "accepted"
             kin = {
                 "distance_m": 0.0,
                 "time_delta_s": 0.0,
                 "derived_speed_mps": None,
                 "derived_speed_kmh": None,
                 "is_implausible_jump": 0,
-                "quality_flag": "accepted",
+                "quality_flag": quality,
             }
 
         client_ip = request.client.host if request.client else "127.0.0.1"
@@ -1988,11 +2391,11 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             """
             INSERT INTO gps_locations (
                 location_id, session_id, driver_id, device_id, vehicle_id, delivery_id,
-                latitude, longitude, accuracy, speed, heading, derived_speed, speed_source,
-                distance_from_prev_m, time_delta_prev_s, is_implausible_jump, quality_flag,
-                client_ip, device_timestamp, server_timestamp, is_valid
+                latitude, longitude, accuracy, altitude, altitude_accuracy, speed, heading,
+                derived_speed, speed_source, distance_from_prev_m, time_delta_prev_s,
+                is_implausible_jump, quality_flag, client_ip, device_timestamp, server_timestamp, is_valid
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 loc_id,
@@ -2004,6 +2407,8 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
                 body.latitude,
                 body.longitude,
                 body.accuracy,
+                body.altitude,
+                body.altitude_accuracy,
                 body.speed,
                 body.heading,
                 kin["derived_speed_mps"],
@@ -2041,6 +2446,8 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             "latitude": body.latitude,
             "longitude": body.longitude,
             "accuracy": body.accuracy,
+            "altitude": body.altitude,
+            "altitude_accuracy": body.altitude_accuracy,
             "speed": body.speed,
             "derived_speed_kmh": kin["derived_speed_kmh"],
             "speed_source": speed_source,
@@ -2175,7 +2582,10 @@ def get_vehicle_latest_location(vehicle_id: str):
             rec["assigned_device"] = None
 
         rec["street_view_url"] = make_street_view_url(rec["latitude"], rec["longitude"])
-        return rec
+        resp = dict(rec)
+        resp["latest_location"] = rec
+        resp["vehicle"] = dict(veh)
+        return resp
 
 
 @app.get("/tracking/deliveries/{delivery_id}/latest")

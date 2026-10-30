@@ -30,8 +30,12 @@ CREATE TABLE IF NOT EXISTS devices (
     device_id TEXT PRIMARY KEY,
     driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
     nickname TEXT NOT NULL,
+    device_category TEXT NULL,
+    model TEXT NULL,
     os_family TEXT NULL,
+    os_version TEXT NULL,
     browser_family TEXT NULL,
+    browser_version TEXT NULL,
     platform TEXT NULL,
     screen_res TEXT NULL,
     capabilities_json TEXT NULL,
@@ -40,7 +44,10 @@ CREATE TABLE IF NOT EXISTS devices (
     registered_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     revoked_at TEXT NULL,
-    is_revoked INTEGER NOT NULL DEFAULT 0
+    is_revoked INTEGER NOT NULL DEFAULT 0,
+    client_device_token TEXT NULL,
+    identity_confidence TEXT NOT NULL DEFAULT 'client_storage_token',
+    detection_limitations TEXT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_devices_driver ON devices(driver_id);
 
@@ -132,6 +139,8 @@ CREATE TABLE IF NOT EXISTS gps_locations (
     latitude REAL NOT NULL CHECK (latitude >= -90.0 AND latitude <= 90.0),
     longitude REAL NOT NULL CHECK (longitude >= -180.0 AND longitude <= 180.0),
     accuracy REAL NOT NULL CHECK (accuracy >= 0),
+    altitude REAL NULL,
+    altitude_accuracy REAL NULL,
     speed REAL NULL,
     heading REAL NULL,
     derived_speed REAL NULL,
@@ -139,7 +148,7 @@ CREATE TABLE IF NOT EXISTS gps_locations (
     distance_from_prev_m REAL NULL,
     time_delta_prev_s REAL NULL,
     is_implausible_jump INTEGER NOT NULL DEFAULT 0,
-    quality_flag TEXT NOT NULL DEFAULT 'accepted' CHECK (quality_flag IN ('accepted', 'flagged_jump', 'low_accuracy', 'stale')),
+    quality_flag TEXT NOT NULL DEFAULT 'accepted' CHECK (quality_flag IN ('accepted', 'flagged_jump', 'low_accuracy', 'stale', 'out_of_order', 'duplicate', 'clock_skew_future')),
     client_ip TEXT NULL,
     device_timestamp TEXT NOT NULL,
     server_timestamp TEXT NOT NULL,
@@ -193,6 +202,16 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type};")
 
+    # Devices
+    add_col_if_missing("devices", "device_category", "TEXT NULL")
+    add_col_if_missing("devices", "model", "TEXT NULL")
+    add_col_if_missing("devices", "os_version", "TEXT NULL")
+    add_col_if_missing("devices", "browser_version", "TEXT NULL")
+    add_col_if_missing("devices", "client_device_token", "TEXT NULL")
+    add_col_if_missing("devices", "identity_confidence", "TEXT NOT NULL DEFAULT 'client_storage_token'")
+    add_col_if_missing("devices", "detection_limitations", "TEXT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_client_token ON devices(client_device_token);")
+
     # Drivers
     add_col_if_missing("drivers", "phone_e164", "TEXT NULL")
     add_col_if_missing("drivers", "phone_verification_status", "TEXT NOT NULL DEFAULT 'unverified'")
@@ -206,6 +225,8 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
 
     # GPS Locations
     add_col_if_missing("gps_locations", "device_id", "TEXT NULL")
+    add_col_if_missing("gps_locations", "altitude", "REAL NULL")
+    add_col_if_missing("gps_locations", "altitude_accuracy", "REAL NULL")
     add_col_if_missing("gps_locations", "derived_speed", "REAL NULL")
     add_col_if_missing("gps_locations", "speed_source", "TEXT NOT NULL DEFAULT 'reported'")
     add_col_if_missing("gps_locations", "distance_from_prev_m", "REAL NULL")

@@ -769,9 +769,85 @@
           </div>
         </section>
 
-        <!-- ==================== VIEW 8: ANALYTICS (SVG CHARTS - B6) ==================== -->
+        <!-- ==================== VIEW 8: ANALYTICS & SOC INTELLIGENCE (B6 & PHASE 7) ==================== -->
         <section id="view-analytics" class="view-section" aria-label="Analytics &amp; Performance Radar">
-          <div class="bento-grid">
+          <!-- Executive KPI Tiles -->
+          <div class="hud-grid-4 mb-xl">
+            <div class="hud-card">
+              <div class="hud-card-header">
+                <span class="hud-title">FLEET UTILIZATION</span>
+                <span class="badge badge-info" id="kpi-active-pool">Active Pool</span>
+              </div>
+              <div class="kpi-value text-primary" id="kpi-fleet-util">0.0%</div>
+              <div class="hud-sub" id="kpi-fleet-sub">0 of 0 active vehicles assigned</div>
+            </div>
+            <div class="hud-card">
+              <div class="hud-card-header">
+                <span class="hud-title">DRIVER UTILIZATION</span>
+                <span class="badge badge-success" id="kpi-driver-badge">Active Drivers</span>
+              </div>
+              <div class="kpi-value text-accent" id="kpi-driver-util">0.0%</div>
+              <div class="hud-sub" id="kpi-driver-sub">0 of 0 eligible drivers assigned</div>
+            </div>
+            <div class="hud-card">
+              <div class="hud-card-header">
+                <span class="hud-title">COMPLETION RATE</span>
+                <span class="badge badge-info">Delivered</span>
+              </div>
+              <div class="kpi-value text-success" id="kpi-completion-rate">0.0%</div>
+              <div class="hud-sub" id="kpi-completion-sub">Excludes cancelled orders</div>
+            </div>
+            <div class="hud-card">
+              <div class="hud-card-header">
+                <span class="hud-title">ON-TIME RATE</span>
+                <span class="badge badge-warning">Promised SLA</span>
+              </div>
+              <div class="kpi-value text-warning" id="kpi-ontime-rate">0.0%</div>
+              <div class="hud-sub" id="kpi-ontime-sub">Orders delivered before deadline</div>
+            </div>
+          </div>
+
+          <!-- Mathematical Accuracy & Confidence Panel -->
+          <div class="bento-grid mb-xl">
+            <div class="kpi-card" style="grid-column: span 6;">
+              <div class="panel-header" style="margin-bottom: var(--space-sm);">
+                <div>
+                  <h2 class="panel-title">Telemetry Quality Score</h2>
+                  <p class="panel-desc">Normalized heuristic: 0.40 GPS + 0.30 Freshness + 0.20 Kinematics + 0.10 Completeness</p>
+                </div>
+                <span class="badge badge-primary" id="badge-quality-version">v1.0.0</span>
+              </div>
+              <div class="hud-row"><span class="hud-lbl">GPS Quality [exp(-acc/50m)]:</span><span class="hud-val" id="lbl-gps-quality">--</span></div>
+              <div class="hud-row"><span class="hud-lbl">Signal Freshness [exp(-age/120s)]:</span><span class="hud-val" id="lbl-freshness-quality">--</span></div>
+              <div class="hud-row"><span class="hud-lbl">Movement Consistency:</span><span class="hud-val" id="lbl-movement-quality">--</span></div>
+              <div class="hud-row"><span class="hud-lbl">Telemetry Completeness:</span><span class="hud-val" id="lbl-completeness-quality">--</span></div>
+              <div class="hud-row" style="border-top:1px solid var(--color-border); padding-top:6px; margin-top:6px;">
+                <span class="hud-lbl" style="font-weight:700;">Overall Telemetry Quality:</span>
+                <span class="hud-val text-primary" style="font-weight:800; font-size:16px;" id="lbl-overall-quality">--</span>
+              </div>
+            </div>
+
+            <div class="kpi-card" style="grid-column: span 6;">
+              <div class="panel-header" style="margin-bottom: var(--space-sm);">
+                <div>
+                  <h2 class="panel-title">Evidence Confidence Score — Heuristic</h2>
+                  <p class="panel-desc">Evaluates device identity assurance and operational assignment eligibility</p>
+                </div>
+                <span class="badge badge-secondary">Zero-Guessing</span>
+              </div>
+              <div class="hud-row"><span class="hud-lbl">Device Identity Confidence:</span><span class="hud-val" id="lbl-device-conf">--</span></div>
+              <div class="hud-row"><span class="hud-lbl">Hardware Trust Assurance:</span><span class="hud-val" id="lbl-device-trust">--</span></div>
+              <div class="hud-row"><span class="hud-lbl">Assignment Hard Constraints:</span><span class="hud-val" id="lbl-asg-constraints">--</span></div>
+              <div class="hud-row"><span class="hud-lbl">Capacity Match Suitability:</span><span class="hud-val" id="lbl-asg-suitability">--</span></div>
+              <div class="hud-row" style="border-top:1px solid var(--color-border); padding-top:6px; margin-top:6px;">
+                <span class="hud-lbl" style="font-weight:700;">Assignment Confidence:</span>
+                <span class="hud-val text-accent" style="font-weight:800; font-size:16px;" id="lbl-overall-asg-conf">--</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Existing Delivery Charts -->
+          <div class="bento-grid mb-xl">
             <div class="kpi-card" style="grid-column: span 6;">
               <h2 class="panel-title">On-Time Delivery Performance</h2>
               <div id="chart-ontime" class="svg-chart-container"></div>
@@ -783,6 +859,37 @@
             <div class="kpi-card" style="grid-column: span 12;">
               <h2 class="panel-title">Driver Workload Distribution (Completed Trips)</h2>
               <div id="chart-workload" class="svg-chart-container"></div>
+            </div>
+          </div>
+
+          <!-- Operational Anomaly Timeline & Evidence Panel -->
+          <div class="table-card" style="padding:var(--space-lg);">
+            <div class="panel-header">
+              <div>
+                <h2 class="panel-title">Operational Anomaly Timeline &amp; Forensic Evidence</h2>
+                <p class="panel-desc">Real-time detection of kinematic jumps, impossible velocity, out-of-order GPS, and device revocations.</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-anomalies">
+                <span data-icon="refresh"></span><span>Refresh Anomalies</span>
+              </button>
+            </div>
+            <div class="table-container mt-md">
+              <table class="data-table" id="table-anomalies">
+                <thead>
+                  <tr>
+                    <th>Event ID</th>
+                    <th>Severity</th>
+                    <th>Type</th>
+                    <th>Entity</th>
+                    <th>Timestamp</th>
+                    <th>Detection Reason &amp; Forensic Evidence</th>
+                    <th>Investigation Action</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-anomalies">
+                  <tr><td colspan="7" class="empty-cell">No anomalies detected. All operations normal.</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -911,6 +1018,28 @@
             </div>
           </div>
 
+          <!-- Context & Permission Status Bar (Phase 2 & 6) -->
+          <div class="hud-status-bar" id="gps-context-status-bar">
+            <span class="badge" id="badge-secure-context"><span class="pulse-dot"></span> Checking Context...</span>
+            <span class="badge" id="badge-gps-permission">Location permission not requested</span>
+            <span class="badge status-inactive" id="badge-tracking-state">GPS tracking stopped</span>
+          </div>
+
+          <!-- Insecure Context Warning Alert -->
+          <div class="alert alert-warning hidden" id="alert-insecure-context" style="margin-bottom:var(--space-lg); background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); border-radius:var(--radius-md); padding:14px; font-size:12px; line-height:1.5;">
+            <div style="display:flex; align-items:flex-start; gap:10px;">
+              <span data-icon="alertTriangle" style="color:#EF4444; flex-shrink:0;"></span>
+              <div>
+                <strong style="color:#EF4444;">Secure context unavailable (Geolocation disabled by mobile browser policy)</strong>
+                <p style="margin:4px 0 0 0; color:var(--color-muted-foreground);">
+                  Modern mobile browsers (iOS Safari, Android Chrome) strictly require a <strong>Secure Context (HTTPS or localhost)</strong> to grant physical GPS access. When accessing via plain HTTP on a LAN IP (e.g. <code>http://192.168.x.x:8000</code>), the browser will permanently block location requests.
+                  <br />
+                  <strong>Solutions:</strong> Use Local HTTPS (<code>https://&lt;LAN-IP&gt;:8443</code> via <code>scripts/start_https.bat</code>) or launch a secure public tunnel via <code>scripts/share_online.bat</code>.
+                </p>
+              </div>
+            </div>
+          </div>
+
           <!-- Consent Banner -->
           <div class="consent-banner">
             <span class="consent-icon" data-icon="alertTriangle"></span>
@@ -944,9 +1073,14 @@
                 </div>
               </div>
 
-              <div class="form-group mb-xl">
-                <label for="driver-device-info" class="form-label">DEVICE IDENTIFIER (OPTIONAL)</label>
-                <input type="text" id="driver-device-info" class="form-input" placeholder="e.g. iPhone 15 / Galaxy S24" />
+              <div class="mb-lg p-sm" style="background:rgba(0, 240, 255, 0.06); border:1px solid rgba(0, 240, 255, 0.2); border-radius:var(--radius-md); font-size:12px; line-height:1.4;">
+                <div style="display:flex; align-items:center; gap:8px; font-weight:600; color:var(--color-primary); margin-bottom:4px;">
+                  <span class="pulse-dot"></span>
+                  <span>Automatic Device Intelligence</span>
+                </div>
+                <div style="color:var(--color-muted-foreground);">
+                  Your smartphone model, OS, browser engine, screen resolution, and hardware sensors are detected automatically upon connecting. No manual device input needed.
+                </div>
               </div>
 
               <div style="display:flex; gap:var(--space-md);">
@@ -989,6 +1123,16 @@
                   <span class="telemetry-value" id="disp-speed">—</span>
                   <span class="telemetry-sub">km / h</span>
                 </div>
+                <div class="telemetry-card">
+                  <span class="telemetry-label">Altitude</span>
+                  <span class="telemetry-value" id="disp-alt">—</span>
+                  <span class="telemetry-sub" id="disp-alt-sub">meters</span>
+                </div>
+                <div class="telemetry-card">
+                  <span class="telemetry-label">Heading</span>
+                  <span class="telemetry-value" id="disp-heading">—</span>
+                  <span class="telemetry-sub">degrees</span>
+                </div>
               </div>
 
               <div style="display:flex; justify-content:space-between; align-items:center; padding:var(--space-md) 0; border-top:1px solid var(--color-border);">
@@ -1001,43 +1145,167 @@
 
               <!-- Mini map for driver feedback -->
               <div class="tracking-map-container mt-md" id="driver-mini-map" style="height:220px;"></div>
+            </div>
+          </div>
 
-              <!-- Automated Device Intelligence Card (Populated on location permission) -->
-              <div class="device-intelligence-card mt-md" id="driver-device-intel-panel" style="display:none;">
-                <div class="intel-header">
-                  <div style="display:flex; align-items:center; gap:8px;">
-                    <span class="layers-pill"><span class="pulse-dot"></span> SENSOR GRANTED</span>
-                    <strong style="font-size:12px; letter-spacing:0.04em;">LIVE HARDWARE TELEMETRY HUD</strong>
-                  </div>
-                  <span class="badge badge-success" id="intel-auto-registered-badge">Auto-Registered</span>
+          <!-- ==================== DEDICATED DEVICE INTELLIGENCE HUD (PHASE 6) ==================== -->
+          <div class="hud-section" id="driver-hud-section">
+            <div class="toolbar-panel" style="margin-bottom:var(--space-md);">
+              <div>
+                <h3 class="section-title" style="font-size:15px; margin:0;">DEVICE &amp; SENSOR INTELLIGENCE HUD</h3>
+                <p class="panel-desc" style="font-size:12px; margin:2px 0 0 0;">Automated client-side hardware profiling, battery metrics, network throughput estimates, and browser capabilities.</p>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge" id="hud-registered-badge">Device Not Registered</span>
+              </div>
+            </div>
+
+            <div class="hud-grid-4">
+              <!-- CARD 1: DEVICE IDENTIFICATION -->
+              <div class="hud-card">
+                <div class="hud-card-header">
+                  <h4 class="hud-card-title"><span data-icon="truck"></span> DEVICE IDENTIFICATION</h4>
+                  <span class="badge badge-sm" id="hud-device-badge">Hardware</span>
                 </div>
-                <div class="intel-grid mt-sm">
-                  <div class="intel-item">
-                    <span class="intel-label">DEVICE &amp; OS</span>
-                    <span class="intel-value" id="intel-device-os">—</span>
+                <div class="hud-data-list">
+                  <div class="hud-row">
+                    <span class="hud-label">Category</span>
+                    <span class="hud-val hud-val-accent" id="hud-device-category">Detecting...</span>
                   </div>
-                  <div class="intel-item">
-                    <span class="intel-label">BROWSER ENGINE</span>
-                    <span class="intel-value" id="intel-browser-engine">—</span>
+                  <div class="hud-row">
+                    <span class="hud-label">Device Model</span>
+                    <span class="hud-val" id="hud-device-model">Device model unavailable through this browser.</span>
                   </div>
-                  <div class="intel-item">
-                    <span class="intel-label">SCREEN MATRIX</span>
-                    <span class="intel-value" id="intel-screen-res">—</span>
+                  <div class="hud-row">
+                    <span class="hud-label">Operating System</span>
+                    <span class="hud-val" id="hud-device-os">Detecting...</span>
                   </div>
-                  <div class="intel-item">
-                    <span class="intel-label">CPU / THREADS</span>
-                    <span class="intel-value" id="intel-cpu-cores">—</span>
+                  <div class="hud-row">
+                    <span class="hud-label">Browser Engine</span>
+                    <span class="hud-val" id="hud-device-browser">Detecting...</span>
                   </div>
-                  <div class="intel-item">
-                    <span class="intel-label">BATTERY STATUS</span>
-                    <span class="intel-value" id="intel-battery">—</span>
+                  <div class="hud-row">
+                    <span class="hud-label">Screen &amp; DPR</span>
+                    <span class="hud-val mono" id="hud-device-screen">—</span>
                   </div>
-                  <div class="intel-item">
-                    <span class="intel-label">NETWORK BANDWIDTH</span>
-                    <span class="intel-value" id="intel-network">—</span>
+                  <div class="hud-row">
+                    <span class="hud-label">CPU Cores</span>
+                    <span class="hud-val" id="hud-device-cpu">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Touch Sensor</span>
+                    <span class="hud-val" id="hud-device-touch">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Time Zone / Lang</span>
+                    <span class="hud-val" id="hud-device-tz">—</span>
                   </div>
                 </div>
               </div>
+
+              <!-- CARD 2: BATTERY INTELLIGENCE -->
+              <div class="hud-card">
+                <div class="hud-card-header">
+                  <h4 class="hud-card-title"><span data-icon="zap"></span> BATTERY INTELLIGENCE</h4>
+                  <span class="badge badge-sm" id="hud-battery-status-badge">API Check</span>
+                </div>
+                <div class="hud-data-list">
+                  <div class="hud-row">
+                    <span class="hud-label">Battery Level</span>
+                    <span class="hud-val hud-val-green" id="hud-battery-pct">Checking...</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Charging State</span>
+                    <span class="hud-val" id="hud-battery-charging">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Est. Charge Time</span>
+                    <span class="hud-val" id="hud-battery-charging-time">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Est. Discharge Time</span>
+                    <span class="hud-val" id="hud-battery-discharging-time">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Reading Timestamp</span>
+                    <span class="hud-val mono" id="hud-battery-timestamp">Awaiting query</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Live Event Listener</span>
+                    <span class="hud-val" id="hud-battery-listener">Inactive</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- CARD 3: NETWORK INTELLIGENCE -->
+              <div class="hud-card">
+                <div class="hud-card-header">
+                  <h4 class="hud-card-title"><span data-icon="activity"></span> NETWORK TELEMETRY</h4>
+                  <span class="badge badge-sm" id="hud-network-status-badge">Network API</span>
+                </div>
+                <div class="hud-data-list">
+                  <div class="hud-row">
+                    <span class="hud-label">Connection Type</span>
+                    <span class="hud-val hud-val-accent" id="hud-network-type">Checking...</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Downlink Estimate</span>
+                    <span class="hud-val" id="hud-network-downlink">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Round-Trip Time</span>
+                    <span class="hud-val" id="hud-network-rtt">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Data Saver Preference</span>
+                    <span class="hud-val" id="hud-network-savedata">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Client IP (Server)</span>
+                    <span class="hud-val mono" id="hud-network-ip">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Network Scope</span>
+                    <span class="hud-val hud-val-muted">Browser throughput estimate</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- CARD 4: CAPABILITIES & SECURITY -->
+              <div class="hud-card">
+                <div class="hud-card-header">
+                  <h4 class="hud-card-title"><span data-icon="shieldAlert"></span> BROWSER CAPABILITIES</h4>
+                  <span class="badge badge-sm badge-success" id="hud-cap-summary">Diagnostics</span>
+                </div>
+                <div class="hud-data-list">
+                  <div class="hud-row">
+                    <span class="hud-label">Secure Context</span>
+                    <span class="hud-val" id="hud-cap-secure">Checking...</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Web Geolocation</span>
+                    <span class="hud-val" id="hud-cap-geo">Checking...</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Battery API</span>
+                    <span class="hud-val" id="hud-cap-battery">Checking...</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Network Information API</span>
+                    <span class="hud-val" id="hud-cap-network">Checking...</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Camera Sensor API</span>
+                    <span class="hud-val" id="hud-cap-camera">Checking...</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Device Revocation</span>
+                    <span class="hud-val hud-val-green" id="hud-device-revocation-state">Active &bull; Valid</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
             </div>
           </div>
         </section>
@@ -1226,6 +1494,12 @@
       </div>
       <form id="form-device-register">
         <div class="modal-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,240,255,0.06); padding:8px 12px; border-radius:var(--radius-sm); margin-bottom:var(--space-md); border:1px solid rgba(0,240,255,0.2);">
+            <span style="font-size:12px; color:var(--color-muted-foreground);">Auto-fill using this browser's hardware:</span>
+            <button type="button" class="btn btn-secondary btn-xs" id="btn-autodetect-device">
+              <span data-icon="zap"></span><span>Auto-Detect My Device</span>
+            </button>
+          </div>
           <div class="form-group mb-md">
             <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
             <select id="dev-reg-driver" class="form-select" required>
@@ -1342,6 +1616,12 @@
       </div>
       <form id="form-device-register">
         <div class="modal-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,240,255,0.06); padding:8px 12px; border-radius:var(--radius-sm); margin-bottom:var(--space-md); border:1px solid rgba(0,240,255,0.2);">
+            <span style="font-size:12px; color:var(--color-muted-foreground);">Auto-fill using this browser's hardware:</span>
+            <button type="button" class="btn btn-secondary btn-xs" id="btn-autodetect-device">
+              <span data-icon="zap"></span><span>Auto-Detect My Device</span>
+            </button>
+          </div>
           <div class="form-group mb-md">
             <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
             <select id="dev-reg-driver" class="form-select" required>
@@ -1468,6 +1748,12 @@
       </div>
       <form id="form-device-register">
         <div class="modal-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,240,255,0.06); padding:8px 12px; border-radius:var(--radius-sm); margin-bottom:var(--space-md); border:1px solid rgba(0,240,255,0.2);">
+            <span style="font-size:12px; color:var(--color-muted-foreground);">Auto-fill using this browser's hardware:</span>
+            <button type="button" class="btn btn-secondary btn-xs" id="btn-autodetect-device">
+              <span data-icon="zap"></span><span>Auto-Detect My Device</span>
+            </button>
+          </div>
           <div class="form-group mb-md">
             <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
             <select id="dev-reg-driver" class="form-select" required>
@@ -1632,6 +1918,12 @@
       </div>
       <form id="form-device-register">
         <div class="modal-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,240,255,0.06); padding:8px 12px; border-radius:var(--radius-sm); margin-bottom:var(--space-md); border:1px solid rgba(0,240,255,0.2);">
+            <span style="font-size:12px; color:var(--color-muted-foreground);">Auto-fill using this browser's hardware:</span>
+            <button type="button" class="btn btn-secondary btn-xs" id="btn-autodetect-device">
+              <span data-icon="zap"></span><span>Auto-Detect My Device</span>
+            </button>
+          </div>
           <div class="form-group mb-md">
             <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
             <select id="dev-reg-driver" class="form-select" required>
@@ -1708,6 +2000,12 @@
       </div>
       <form id="form-device-register">
         <div class="modal-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,240,255,0.06); padding:8px 12px; border-radius:var(--radius-sm); margin-bottom:var(--space-md); border:1px solid rgba(0,240,255,0.2);">
+            <span style="font-size:12px; color:var(--color-muted-foreground);">Auto-fill using this browser's hardware:</span>
+            <button type="button" class="btn btn-secondary btn-xs" id="btn-autodetect-device">
+              <span data-icon="zap"></span><span>Auto-Detect My Device</span>
+            </button>
+          </div>
           <div class="form-group mb-md">
             <label for="dev-reg-driver" class="form-label">ASSIGNED DRIVER</label>
             <select id="dev-reg-driver" class="form-select" required>
@@ -1789,16 +2087,29 @@
         <p class="panel-desc" style="margin-bottom: var(--space-md);">
           Connect any smartphone, tablet, or secondary workstation instantly. Scan the QR code with your mobile camera or copy the network URL.
         </p>
+
+        <!-- Target Protocol / Access Mode Selector -->
+        <div class="share-targets-bar" id="share-targets-bar">
+          <button type="button" class="share-target-btn active" data-share-target="lan-https" id="btn-target-https">
+            🔒 Local HTTPS (:8443) [Mobile GPS Ready]
+          </button>
+          <button type="button" class="share-target-btn" data-share-target="lan-http" id="btn-target-http">
+            Local HTTP (:8000)
+          </button>
+          <button type="button" class="share-target-btn" data-share-target="localhost" id="btn-target-localhost">
+            Localhost (127.0.0.1)
+          </button>
+        </div>
         
         <div class="share-qr-wrap mb-md">
           <div id="share-qr-container" style="display:flex; justify-content:center; align-items:center; background:#ffffff; padding:16px; border-radius:12px; margin:0 auto; width: fit-content; box-shadow: 0 8px 30px rgba(0,240,255,0.15);"></div>
           <div class="text-center mt-sm">
-            <span class="badge badge-success">Scan with Phone Camera</span>
+            <span class="badge badge-success" id="share-qr-badge">Encodes exact displayed URL below</span>
           </div>
         </div>
 
         <div class="form-group mb-md">
-          <label for="share-lan-url" class="form-label">DIRECT LAN ACCESS URL</label>
+          <label for="share-lan-url" class="form-label" id="share-url-label">TARGET ACCESS URL</label>
           <div style="display:flex; gap:var(--space-xs);">
             <input type="text" id="share-lan-url" class="form-input mono" readonly style="font-weight:600; color:var(--color-primary);" />
             <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-share-url" title="Copy to clipboard">
@@ -1807,12 +2118,18 @@
           </div>
         </div>
 
+        <!-- Mobile GPS Security Notice -->
+        <div class="p-sm mb-md" style="background:rgba(0, 240, 255, 0.08); border:1px solid rgba(0, 240, 255, 0.25); border-radius:var(--radius-md); font-size:11px; line-height:1.4;">
+          <strong style="color:var(--color-primary);">🔒 Mobile Geolocation Security Requirement:</strong>
+          Mobile browsers (Safari on iOS, Chrome on Android) require a <strong>Secure Context (HTTPS or localhost)</strong> before they will prompt for or stream physical GPS coordinates. Use the <strong>Local HTTPS (:8443)</strong> option or the Public Tunnel below on phones.
+        </div>
+
         <div class="card p-sm" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md);">
           <div style="display:flex; align-items:center; gap:var(--space-xs); font-weight:600; font-size:12px; color:var(--color-secondary);">
             <span data-icon="zap"></span> PUBLIC INTERNET ACCESS VIA SECURE TUNNEL
           </div>
           <p class="kpi-sub mt-xs" style="font-size:11px; margin:4px 0 0 0;">
-            To share outside your local Wi-Fi across the public internet, execute:
+            To share outside your local Wi-Fi across the public internet with remote test drivers, execute:
             <code class="mono" style="color:var(--color-primary); background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; display:inline-block; margin-top:4px;">npx localtunnel --port 8000</code>
             or run <code class="mono" style="color:var(--color-primary);">scripts/share_online.bat</code>.
           </p>

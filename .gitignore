@@ -23,3 +23,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# SSL / TLS local development certificates & keys
+certs/*.pem
+certs/*.key
+certs/*.crt
+
+

@@ -44,22 +44,52 @@ def evaluate_telemetry_step(
     curr_lon: float,
     curr_timestamp_iso: str,
     reported_speed_mps: Optional[float] = None,
+    accuracy_m: Optional[float] = None,
+    max_accuracy_threshold_m: float = 150.0,
 ) -> Dict[str, Any]:
     """
     Evaluates step kinematics between consecutive GPS fixes:
-    Computes distance, time delta, derived speed, and detects physical jump outliers.
+    Computes distance, time delta, derived speed, detects physical jump outliers,
+    and classifies out-of-order or duplicate submissions.
     """
     dist_m = haversine_distance_meters(prev_lat, prev_lon, curr_lat, curr_lon)
 
-    t1 = datetime.fromisoformat(prev_timestamp_iso.replace("Z", "+00:00"))
-    t2 = datetime.fromisoformat(curr_timestamp_iso.replace("Z", "+00:00"))
-    delta_s = (t2 - t1).total_seconds()
+    try:
+        t1 = datetime.fromisoformat(prev_timestamp_iso.replace("Z", "+00:00"))
+        t2 = datetime.fromisoformat(curr_timestamp_iso.replace("Z", "+00:00"))
+        delta_s = (t2 - t1).total_seconds()
+    except Exception:
+        delta_s = 0.0
 
-    derived_speed_mps: Optional[float] = None
-    if delta_s > 0.0:
-        derived_speed_mps = dist_m / delta_s
+    # 1. Out-of-order event check
+    if delta_s < 0.0:
+        return {
+            "distance_m": round(dist_m, 2),
+            "time_delta_s": round(delta_s, 2),
+            "derived_speed_mps": None,
+            "derived_speed_kmh": None,
+            "is_implausible_jump": 0,
+            "is_out_of_order": 1,
+            "quality_flag": "out_of_order",
+        }
 
-    # Implausible jump detection
+    # 2. Duplicate or zero-delta submission
+    if delta_s == 0.0:
+        is_jump = 1 if dist_m > 5.0 else 0
+        return {
+            "distance_m": round(dist_m, 2),
+            "time_delta_s": 0.0,
+            "derived_speed_mps": None,
+            "derived_speed_kmh": None,
+            "is_implausible_jump": is_jump,
+            "is_out_of_order": 0,
+            "quality_flag": "zero_delta_movement" if is_jump else "duplicate",
+        }
+
+    # 3. Kinematic speed calculation
+    derived_speed_mps: Optional[float] = dist_m / delta_s
+
+    # 4. Implausible jump detection
     is_jump = False
     effective_speed = reported_speed_mps if reported_speed_mps is not None else derived_speed_mps
 
@@ -68,14 +98,39 @@ def evaluate_telemetry_step(
     elif delta_s < 2.0 and dist_m > 300.0:  # >300m in <2s = >150 m/s
         is_jump = True
 
+    quality_flag = "flagged_jump" if is_jump else "accepted"
+    if not is_jump and accuracy_m is not None and accuracy_m > max_accuracy_threshold_m:
+        quality_flag = "low_accuracy"
+
     return {
         "distance_m": round(dist_m, 2),
         "time_delta_s": round(delta_s, 2),
         "derived_speed_mps": round(derived_speed_mps, 2) if derived_speed_mps is not None else None,
         "derived_speed_kmh": round(derived_speed_mps * 3.6, 1) if derived_speed_mps is not None else None,
         "is_implausible_jump": 1 if is_jump else 0,
-        "quality_flag": "flagged_jump" if is_jump else "accepted",
+        "is_out_of_order": 0,
+        "quality_flag": quality_flag,
     }
+
+
+def evaluate_timestamp_validity(device_timestamp_iso: str, server_timestamp_iso: str) -> Dict[str, Any]:
+    """
+    Validates device timestamp against server timestamp to detect stale fixes or severe clock skew.
+    """
+    try:
+        t_dev = datetime.fromisoformat(device_timestamp_iso.replace("Z", "+00:00"))
+        t_srv = datetime.fromisoformat(server_timestamp_iso.replace("Z", "+00:00"))
+        skew_s = (t_srv - t_dev).total_seconds()
+    except Exception:
+        return {"skew_seconds": 0.0, "status": "unknown"}
+
+    if skew_s > 86400.0:  # Older than 24 hours
+        return {"skew_seconds": round(skew_s, 1), "status": "stale_critical"}
+    elif skew_s > 300.0:  # Older than 5 minutes
+        return {"skew_seconds": round(skew_s, 1), "status": "stale"}
+    elif skew_s < -300.0:  # More than 5 minutes in the future
+        return {"skew_seconds": round(skew_s, 1), "status": "clock_skew_future"}
+    return {"skew_seconds": round(skew_s, 1), "status": "synchronized"}
 
 
 def compute_freshness_status(server_timestamp_iso: str) -> Dict[str, Any]:

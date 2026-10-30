@@ -1,0 +1,6 @@
+delivery_id,customer_name,pickup_address,delivery_address,priority,status
+,Test Customer A,"Warehouse A, Tiruchengode","Main Road, Tiruchengode",high,pending
+,Test Customer B,"Warehouse A, Tiruchengode","Bus Stand, Namakkal",medium,pending
+,Test Customer C,"Warehouse B, Erode","Railway Station, Erode",low,pending
+,Test Customer D,"Warehouse A, Salem","New Bus Stand, Salem",high,pending
+,Test Customer E,"Warehouse C, Coimbatore","Gandhipuram, Coimbatore",medium,pending

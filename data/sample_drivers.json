@@ -1,0 +1,37 @@
+[
+  {
+    "driver_id": "",
+    "name": "Arun Kumar",
+    "phone": "9876501001",
+    "license_no": "TN0120200001234",
+    "status": "available"
+  },
+  {
+    "driver_id": "",
+    "name": "Priya S",
+    "phone": "9876501002",
+    "license_no": "TN0120200001235",
+    "status": "available"
+  },
+  {
+    "driver_id": "",
+    "name": "Mohammed Iqbal",
+    "phone": "9876501003",
+    "license_no": "TN0120200001236",
+    "status": "available"
+  },
+  {
+    "driver_id": "",
+    "name": "Karthik R",
+    "phone": "9876501004",
+    "license_no": "TN0120200001237",
+    "status": "inactive"
+  },
+  {
+    "driver_id": "",
+    "name": "Divya M",
+    "phone": "9876501005",
+    "license_no": "TN0120200001238",
+    "status": "available"
+  }
+]
