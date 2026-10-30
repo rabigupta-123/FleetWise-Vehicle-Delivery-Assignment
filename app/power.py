@@ -103,3 +103,4 @@ def get_hardware_power_status() -> Dict[str, Any]:
         "source": "No battery sensor detected (Desktop / VM)",
         "reading_timestamp": now_str,
     }
+
