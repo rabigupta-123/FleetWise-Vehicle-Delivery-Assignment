@@ -3,6 +3,12 @@ Validates KaTeX math formatting in Markdown documents.
 Checks that all math delimiters ($ and $$) are balanced,
 literal dollar signs are properly escaped or in code blocks,
 and no syntax errors trigger GitHub math rendering failure.
+
+LIMITATION:
+This script performs lexical delimiter balance checks and regex-based unescaped
+currency checks. For complete LaTeX grammar AST parsing with throwOnError: true,
+refer to the automated Node.js test suite in tests/test_katex_syntax.test.js
+and tests/test_docs_formulas.py.
 """
 import re
 import sys

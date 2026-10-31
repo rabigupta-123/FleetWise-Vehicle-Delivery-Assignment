@@ -237,13 +237,13 @@ python scripts/check_secrets.py
 ruff check app tests
 
 # 3. Run Pyrefly Static Type Checker
-pyrefly check
+pyrefly check app tests
 
 # 4. Run KaTeX Math Syntax Validation
 python scripts/check_math_syntax.py
 
 # 5. Run Node.js Battery Truthfulness Unit Tests
-node --test tests/test_battery_states.test.js
+node --test tests/test_battery_states.test.js tests/test_katex_syntax.test.js
 
 # 6. Run Full Pytest Integration Suite
 pytest -v --junitxml=junit.xml

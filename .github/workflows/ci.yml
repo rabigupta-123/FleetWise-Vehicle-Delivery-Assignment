@@ -29,7 +29,10 @@ jobs:
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+            node-version: "20"
+
+      - name: Install Node Dependencies
+        run: npm install
 
       - name: Install Python Dependencies
         run: |
@@ -48,8 +51,8 @@ jobs:
       - name: Math & KaTeX Formatting Check
         run: python scripts/check_math_syntax.py
 
-      - name: Node.js Unit Tests (Battery States)
-        run: node --test tests/test_battery_states.test.js
+      - name: Node.js Unit & KaTeX AST Tests
+        run: node --test tests/test_battery_states.test.js tests/test_katex_syntax.test.js
 
       - name: Pytest Integration & Physics Suite
         run: pytest -v --junitxml=junit.xml
