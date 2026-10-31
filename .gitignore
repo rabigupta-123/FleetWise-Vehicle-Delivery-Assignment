@@ -24,9 +24,16 @@ htmlcov/
 Thumbs.db
 
 # SSL / TLS local development certificates & keys
-certs/*.pem
-certs/*.key
-certs/*.crt
+certs/
+*.pem
+*.key
+*.crt
+
+# Node dependencies
+node_modules/
+
+# Agent skills & local assistant configuration
+.agents/
 
 # Linters and Test Reports
 .ruff_cache/
