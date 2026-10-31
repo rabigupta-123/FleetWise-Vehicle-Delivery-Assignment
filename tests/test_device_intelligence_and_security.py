@@ -465,6 +465,7 @@ def test_system_host_power_endpoint(client: TestClient):
 def test_linux_and_missing_hardware_power_fallback(monkeypatch):
     """Verifies that on non-Windows or when ctypes.windll is missing, status is 'unavailable' with a truthful reason."""
     import sys
+
     from app.power import get_server_host_power_status
 
     # Simulate non-Windows Linux platform with no psutil battery

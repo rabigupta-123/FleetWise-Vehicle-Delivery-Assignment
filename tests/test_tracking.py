@@ -244,7 +244,8 @@ def test_gps_telemetry_retention_purge(temp_db: str, monkeypatch):
     historical fixes older than the retention cutoff (default 30 days).
     """
     import sqlite3
-    from datetime import datetime, UTC, timedelta
+    from datetime import UTC, datetime, timedelta
+
     from app.db import purge_old_gps_telemetry
 
     conn = sqlite3.connect(temp_db)

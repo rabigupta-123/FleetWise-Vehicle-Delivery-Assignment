@@ -410,6 +410,7 @@ def test_auth_enforcement_on_all_routes_when_require_auth_active(client: TestCli
     Allowlist: {/, /health, /auth/login, /probe, /static/*, /openapi.json, /docs, /redoc, /docs/oauth2-redirect}
     """
     import re
+
     from app.main import app
 
     monkeypatch.setenv("REQUIRE_AUTH", "1")
