@@ -2492,7 +2492,6 @@ function updateServerHostPowerHud(data) {
     badge.textContent = 'Host Power Live';
   }
 }
-}
 
 function inspectNetwork() {
   const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FLEETWISE — Vehicle &amp; Delivery Assignment Control Room</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238B5CF6' stroke-width='2'><polygon points='3 11 22 2 13 21 11 13 3 11'/></svg>" />
   <link rel="stylesheet" href="/static/css/tokens.css" />
   <link rel="stylesheet" href="/static/css/styles.css" />
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
@@ -1405,50 +1406,7 @@
           </div>
         </section>
 
-                <!-- ==================== VIEW: DEVICE INVENTORY ==================== -->
-        <section id="view-devices" class="view-section" aria-label="Device Inventory &amp; Telemetry Registry">
-          <div class="toolbar-panel">
-            <div>
-              <h2 class="section-title">AUTHENTICATED DEVICE INVENTORY</h2>
-              <p class="panel-desc">Manage registered smartphone sessions, browser capability flags, and revocation guards.</p>
-            </div>
-            <div class="toolbar-actions">
-              <button type="button" class="btn btn-primary btn-sm" id="btn-open-register-device">
-                <span data-icon="plus"></span><span>Register Device</span>
-              </button>
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-devices">
-                <span data-icon="refresh"></span><span>Refresh Devices</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="table-card">
-            <div class="table-responsive">
-              <table class="data-table" id="devices-table">
-                <thead>
-                  <tr>
-                    <th>Device ID</th>
-                    <th>Assigned Driver</th>
-                    <th>Nickname</th>
-                    <th>OS / Browser</th>
-                    <th>Permission</th>
-                    <th>Last Known IP</th>
-                    <th>Last Seen</th>
-                    <th>Status</th>
-                    <th class="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="devices-tbody">
-                  <tr>
-                    <td colspan="9" class="empty-cell">Loading registered devices...</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-<!-- ==================== VIEW 10: AUDIT LOG ==================== -->
+        <!-- ==================== VIEW 10: AUDIT LOG ==================== -->
         <section id="view-audit" class="view-section" aria-label="System Audit Log">
           <div class="toolbar-panel">
             <div>
