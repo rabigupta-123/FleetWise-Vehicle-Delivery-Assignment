@@ -71,6 +71,26 @@ def get_worked_examples() -> dict[str, Any]:
     # Zero denominator case: 0 total vehicles -> null / None
     zero_fleet = None
 
+    # 7. Real-GPS Kalman & Mathematical Pipeline
+    from app.gps_pipeline import (
+        equirectangular_project,
+        inv_equirectangular_project,
+        KalmanFilter2D,
+        calculate_position_confidence,
+        check_geofence_arrival,
+        calculate_eta_and_progress,
+    )
+    proj_x, proj_y = equirectangular_project(lat2, lon2, lat1, lon1)
+    kf_ex = KalmanFilter2D(init_x=0.0, init_y=0.0, init_accuracy=10.0)
+    kf_ex.predict(dt=1.0)
+    fx, fy, vx, vy, is_gated, d2, sig_pos = kf_ex.update(proj_x, proj_y, accuracy_m=10.0)
+
+    pos_conf = calculate_position_confidence(sigma_pos=sig_pos, radius_m=10.0)
+    arrived, dist_to_tgt, arr_conf = check_geofence_arrival(
+        lat2, lon2, lat2, lon2, sigma_pos=sig_pos, radius_m=50.0, sustained_seconds=25.0
+    )
+    eta_res = calculate_eta_and_progress(lat1, lon1, lat2, lon2, lat1, lon1, [35.0, 40.0], sigma_pos=sig_pos)
+
     return {
         "haversine_meters": hav_m_rounded,
         "speed_mps": speed_mps,
@@ -91,6 +111,18 @@ def get_worked_examples() -> dict[str, Any]:
             "freshness_quality": telem_acc["component_scores"].get("freshness"),
             "movement_quality": telem_acc["component_scores"].get("movement_consistency"),
             "completeness_quality": telem_acc["component_scores"].get("data_completeness"),
+        },
+        "gps_pipeline": {
+            "projected_x_m": round(proj_x, 2),
+            "projected_y_m": round(proj_y, 2),
+            "kalman_filtered_x_m": round(fx, 2),
+            "kalman_filtered_y_m": round(fy, 2),
+            "is_outlier_gated": is_gated,
+            "mahalanobis_d2": round(d2, 3),
+            "position_confidence": round(pos_conf, 4),
+            "geofence_arrived": arrived,
+            "eta_seconds": eta_res["eta_seconds"],
+            "route_progress_pct": eta_res["route_progress_pct"],
         },
         "analytics": {
             "fleet_utilization_pct": fleet_util,

@@ -473,14 +473,14 @@ def test_audit_11_http_error_envelopes_and_routes(client: TestClient, temp_db: s
     assert "Delivery 'D-NONEXISTENT' does not exist." in res_unknown_id.json()["message"]
 
     # 4. Malformed JSON payload returns 400 VALIDATION_ERROR
-    res_malformed_json = client.post("/auth/login", content=b"invalid-non-json", headers={"Content-Type": "application/json"})
+    res_malformed_json = client.post("/vehicles", content=b"invalid-non-json", headers={"Content-Type": "application/json"})
     assert res_malformed_json.status_code == 400
     assert res_malformed_json.json()["error"] == "VALIDATION_ERROR"
 
     record_test_result(
         "AUDIT-11",
         "HTTP Error Envelopes & Route Separation",
-        {"routes_tested": ["/api/v1/nonexistent-route-endpoint", "/health (POST)", "/deliveries/D-NONEXISTENT/assign", "/auth/login (bad JSON)"]},
+        {"routes_tested": ["/api/v1/nonexistent-route-endpoint", "/health (POST)", "/deliveries/D-NONEXISTENT/assign", "/vehicles (bad JSON)"]},
         {"status_codes": [404, 405, 404, 400], "all_have_error_envelope": True},
         {"observed_codes": [res_unknown_route.status_code, res_wrong_method.status_code, res_unknown_id.status_code, res_malformed_json.status_code], "all_have_error_envelope": True},
         True,
@@ -780,31 +780,6 @@ def test_phase_b_race_lab_diagnostics(client: TestClient, temp_db: str):
         evidence_path="evidence/phase_b_racelab.json",
     )
 
-
-def test_phase_b_rbac_and_auth_flow(client: TestClient, temp_db: str):
-    # Test login
-    login_res = client.post("/auth/login", json={"username": "dispatcher", "password": "DispatcherSecurePass123!"})
-    assert login_res.status_code == 200
-    assert login_res.json()["user"]["role"] == "dispatcher"
-
-    # Test auth me
-    me_res = client.get("/auth/me")
-    assert me_res.status_code == 200
-    assert me_res.json()["authenticated"] is True
-
-    # Test logout
-    logout_res = client.post("/auth/logout")
-    assert logout_res.status_code == 200
-
-    record_test_result(
-        test_id="PHASE-B5",
-        name="RBAC & Authentication Flow",
-        test_input={"user": "dispatcher", "action": "login/me/logout"},
-        expected={"login_status": 200, "authenticated": True, "logout_status": 200},
-        observed={"login_status": login_res.status_code, "authenticated": me_res.json()["authenticated"], "logout_status": logout_res.status_code},
-        passed=True,
-        evidence_path="evidence/phase_b_auth.json",
-    )
 
 
 def test_phase_b_analytics_and_routes(client: TestClient, temp_db: str):

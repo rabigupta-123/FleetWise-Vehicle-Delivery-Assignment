@@ -101,3 +101,40 @@ HEURISTIC_STALE_THRESHOLD_S: float = 300.0
 
 # Rate limiting minimum interval between device location fixes per tracking session
 HEURISTIC_MIN_GPS_INTERVAL_S: float = 0.5
+
+# =====================================================================
+# ACCURACY & KALMAN FILTER PIPELINE CONSTANTS (Empirical heuristics)
+# =====================================================================
+# Browser reported accuracy radius divisor to estimate 1-sigma standard deviation
+# Android reports 68% radius (1 sigma); W3C spec specifies 95% (approx 2 sigma)
+ACCURACY_SIGMA_DIVISOR: float = float(os.environ.get("ACCURACY_SIGMA_DIVISOR", "1.0"))
+
+# Kalman filter process noise: acceleration standard deviation in m/s^2
+KALMAN_SIGMA_A: float = float(os.environ.get("KALMAN_SIGMA_A", "1.5"))
+
+# Kalman filter measurement noise minimum floor in meters
+KALMAN_SIGMA_M_MIN: float = 3.0
+
+# Outlier gating threshold (chi-square 2 DOF at 99% confidence level)
+MAHALANOBIS_OUTLIER_THRESHOLD: float = 9.21
+
+# Stationary position freeze thresholds
+STATIONARY_SPEED_THRESHOLD_MPS: float = 0.5
+STATIONARY_DURATION_MIN_S: float = 10.0
+
+# Heading calculation minimum speed in m/s
+HEADING_MIN_SPEED_MPS: float = 1.0
+
+# Geofence arrival defaults
+GEOFENCE_RADIUS_M: float = float(os.environ.get("GEOFENCE_RADIUS_M", "50.0"))
+GEOFENCE_CONFIDENCE_THRESHOLD: float = 0.90
+GEOFENCE_SUSTAINED_S: float = 20.0
+
+# Route factor and ETA calculations
+ROUTE_FACTOR: float = float(os.environ.get("ROUTE_FACTOR", "1.3"))
+ETA_SPEED_FLOOR_KMH: float = 5.0
+ETA_EWMA_ALPHA: float = 0.20
+
+# Demo location defaults
+DEMO_CENTER_LAT: float = float(os.environ.get("DEMO_CENTER_LAT", "12.9716"))
+DEMO_CENTER_LON: float = float(os.environ.get("DEMO_CENTER_LON", "77.5946"))

@@ -211,23 +211,16 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     r = client.get("/export/unknown_entity.csv")
     assert r.status_code == 404
 
-    # 24. POST /auth/login -> 200, 400, 401
-    # 400 Missing username/password
+    # 24. POST /auth/login -> 200 (direct access in hackathon mode)
     r = client.post("/auth/login", json={})
-    assert r.status_code == 400
-    # 401 Invalid password
-    r = client.post("/auth/login", json={"username": "dispatcher", "password": "wrongpassword"})
-    assert r.status_code == 401
-    # 200 Valid
-    r = client.post("/auth/login", json={"username": "dispatcher", "password": "DispatcherSecurePass123!"})
     assert r.status_code == 200
-    assert r.json()["user"]["username"] == "dispatcher"
+    assert r.json()["user"]["username"] == "operator"
 
     # 25. GET /auth/me -> 200
     r = client.get("/auth/me")
     assert r.status_code == 200
     assert r.json()["authenticated"] is True
-    assert r.json()["user"]["username"] == "dispatcher"
+    assert r.json()["user"]["username"] == "operator"
 
     # 26. POST /auth/logout -> 200
     r = client.post("/auth/logout")
@@ -262,26 +255,20 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     r = client.patch("/drivers/DR-NONEXISTENT/phone", json={"phone": "+91 98765 00001"})
     assert r.status_code == 404
 
-    # 30. POST /drivers/{id}/phone/request-verification -> 200, 400, 429
-    # 200 Valid
-    r = client.post("/drivers/DR-AUDIT-1/phone/request-verification")
-    assert r.status_code == 200
-    assert "verification_id" in r.json()
-    ver_id = r.json()["verification_id"]
-    dev_code = r.json().get("dev_challenge_code")
+    # 30. POST /api/pairing-tokens -> 201
+    r_pair = client.post("/api/pairing-tokens", json={"driver_id": "DR-AUDIT-1"})
+    assert r_pair.status_code == 201
+    pair_token = r_pair.json()["token"]
+    assert len(pair_token) >= 24
 
-    # 404 Nonexistent
-    r = client.post("/drivers/DR-NONEXISTENT/phone/request-verification")
-    assert r.status_code == 404
+    # 31. GET /api/pairing-tokens -> 200, POST /api/pairing-tokens/{token}/revoke -> 200
+    r_list = client.get("/api/pairing-tokens")
+    assert r_list.status_code == 200
+    assert any(t["token"] == pair_token for t in r_list.json())
 
-    # 31. POST /drivers/{id}/phone/verify -> 200, 400
-    # 400 Wrong code
-    r = client.post("/drivers/DR-AUDIT-1/phone/verify", json={"verification_id": ver_id, "code": "000000"})
-    assert r.status_code == 400
-    # 200 Valid code
-    r = client.post("/drivers/DR-AUDIT-1/phone/verify", json={"verification_id": ver_id, "code": dev_code})
-    assert r.status_code == 200
-    assert r.json()["verified"] is True
+    r_rev = client.post(f"/api/pairing-tokens/{pair_token}/revoke")
+    assert r_rev.status_code == 200
+    assert r_rev.json()["revoked"] is True
 
     # 32. POST /devices/register -> 201, 400
     # 201 Valid
@@ -403,60 +390,55 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     assert "points" in r.json()
 
 
-def test_auth_enforcement_on_all_routes_when_require_auth_active(client: TestClient, monkeypatch):
+def test_loopback_and_phone_pairing_guard_network_enforcement(client: TestClient, monkeypatch):
     """
-    Enumerates every route registered in app.routes.
-    When REQUIRE_AUTH=1, asserts that all non-allowlisted routes return 401 without credentials.
-    Allowlist: {/, /health, /auth/login, /probe, /static/*, /openapi.json, /docs, /redoc, /docs/oauth2-redirect}
+    Verifies hackathon network access guards:
+    1. Loopback client gets 200 directly.
+    2. Simulated remote client (192.168.1.50) gets 403 on dashboard/API routes.
+    3. Spoofed X-Forwarded-For header does not bypass loopback guard.
+    4. Phone pairing token allows access ONLY to phone routes (/driver, /probe, /tracking).
+    5. Expired, revoked, or wrong-device tokens are rejected with 403.
+    6. FLEETWISE_SHARE_LAN=1 enables LAN dashboard access for remote clients.
     """
-    import re
-
+    from app.auth import generate_pairing_token, revoke_pairing_token
     from app.main import app
 
-    monkeypatch.setenv("REQUIRE_AUTH", "1")
-    public_allowlist = {
-        "/",
-        "/health",
-        "/auth/login",
-        "/probe",
-        "/probe/report",
-        "/openapi.json",
-        "/docs",
-        "/redoc",
-        "/docs/oauth2-redirect",
-    }
+    # 1. Loopback client gets 200
+    res_loop = client.get("/vehicles")
+    assert res_loop.status_code == 200
 
-    tested_routes = 0
-    for route in app.routes:
-        path = getattr(route, "path", None)
-        methods = getattr(route, "methods", None)
-        if not path or not methods:
-            continue
+    # 2. Remote client gets 403 on dashboard/API routes
+    remote_client = TestClient(app, client=("192.168.1.50", 50000))
+    res_rem = remote_client.get("/vehicles")
+    assert res_rem.status_code == 403
+    assert res_rem.json()["error"] == "FORBIDDEN"
 
-        # Skip documentation and Swagger UI routes
-        if path in public_allowlist or path.startswith("/static"):
-            continue
+    # 3. Spoofed X-Forwarded-For header does NOT bypass guard
+    res_spoof = remote_client.get("/vehicles", headers={"x-forwarded-for": "127.0.0.1"})
+    assert res_spoof.status_code == 403
 
-        # Substitute path parameters (e.g., {delivery_id} -> test_id)
-        test_path = re.sub(r"\{[^}]+\}", "test_id", path)
+    # 4. Phone route without token gets 403
+    res_phone_no_tok = remote_client.get("/driver")
+    assert res_phone_no_tok.status_code == 403
 
-        # Pick one supported method to probe
-        method = "GET" if "GET" in methods else ("POST" if "POST" in methods else list(methods)[0])
+    # 5. Valid pairing token allows access to phone routes
+    tok = generate_pairing_token()
+    res_phone_ok = remote_client.get(f"/driver?pair={tok}")
+    assert res_phone_ok.status_code == 200
 
-        if method == "GET":
-            res = client.get(test_path)
-        elif method == "POST":
-            res = client.post(test_path, json={})
-        elif method == "PATCH":
-            res = client.patch(test_path, json={})
-        else:
-            continue
+    # 6. Phone token does NOT allow access to admin routes
+    res_admin_with_tok = remote_client.get(f"/vehicles?pair={tok}")
+    assert res_admin_with_tok.status_code == 403
 
-        tested_routes += 1
-        assert res.status_code == 401, f"Route {method} {path} returned {res.status_code} instead of 401"
-        assert res.json()["error"] == "UNAUTHORIZED"
+    # 7. Revoked token is rejected
+    revoke_pairing_token(tok)
+    res_phone_revoked = remote_client.get(f"/driver?pair={tok}")
+    assert res_phone_revoked.status_code == 403
 
-    assert tested_routes >= 35, f"Expected at least 35 protected routes tested, got {tested_routes}"
+    # 8. --share mode opens dashboard to LAN clients
+    monkeypatch.setenv("FLEETWISE_SHARE_LAN", "1")
+    res_share = remote_client.get("/vehicles")
+    assert res_share.status_code == 200
 
 
 def test_route_order_dispatch_next_and_blocked(client: TestClient, temp_db: str):

@@ -6,6 +6,8 @@ from datetime import UTC
 
 from fastapi.testclient import TestClient
 
+from app.main import app
+
 
 def test_device_registration_attributes_and_duplicate_prevention(client: TestClient, temp_db: str):
     # 1. Setup Driver
@@ -412,30 +414,25 @@ def test_concurrent_gps_rate_limit_atomic_enforcement(client: TestClient, temp_d
 
 
 def test_tunnel_external_access_authentication_guard(client: TestClient, temp_db: str):
-    # Simulating request through localtunnel public proxy
-    tunnel_headers = {"x-forwarded-host": "fleetwise-secure.loca.lt"}
+    # Non-loopback client attempting write without --share must receive 403 FORBIDDEN
+    remote_client = TestClient(app, client=("192.168.1.50", 50000))
 
-    # Public unauthenticated request attempting write must receive 401 UNAUTHORIZED
-    res_unauth = client.post("/vehicles", json={
+    res_unauth = remote_client.post("/vehicles", json={
         "vehicle_id": "V-TUNNEL-1",
         "registration_no": "KA-01-TU-1111",
         "type": "van",
         "capacity": 1000,
-    }, headers=tunnel_headers)
-    assert res_unauth.status_code == 401
-    assert res_unauth.json()["error"] == "UNAUTHORIZED"
+    })
+    assert res_unauth.status_code == 403
+    assert res_unauth.json()["error"] == "FORBIDDEN"
 
-    # Authenticated user with ops_lead session cookie is allowed
-    from app.auth import sign_session_data
-    token = sign_session_data({"username": "ops_lead", "role": "ops_lead"})
-    auth_headers = {**tunnel_headers, "Cookie": f"fleetwise_session={token}"}
-
+    # Loopback client is authorized directly in hackathon mode
     res_auth = client.post("/vehicles", json={
         "vehicle_id": "V-TUNNEL-1",
         "registration_no": "KA-01-TU-1111",
         "type": "van",
         "capacity": 1000,
-    }, headers=auth_headers)
+    })
     assert res_auth.status_code == 201
 
 

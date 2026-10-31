@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS vehicles (
     registration_no TEXT UNIQUE NOT NULL,
     type TEXT NOT NULL,
     capacity INTEGER NOT NULL CHECK (capacity > 0),
-    status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'assigned', 'maintenance', 'inactive'))
+    status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'assigned', 'maintenance', 'inactive')),
+    is_demo INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS drivers (
@@ -22,10 +23,11 @@ CREATE TABLE IF NOT EXISTS drivers (
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     phone_e164 TEXT NULL,
-    phone_verification_status TEXT NOT NULL DEFAULT 'unverified' CHECK (phone_verification_status IN ('unverified', 'pending', 'verified', 'failed')),
+    phone_verification_status TEXT NOT NULL DEFAULT 'unverified',
     phone_carrier TEXT NULL,
     phone_country_code TEXT NULL,
-    availability_status TEXT NOT NULL DEFAULT 'available' CHECK (availability_status IN ('available', 'assigned', 'unavailable'))
+    availability_status TEXT NOT NULL DEFAULT 'available' CHECK (availability_status IN ('available', 'assigned', 'unavailable')),
+    is_demo INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS devices (
@@ -53,17 +55,15 @@ CREATE TABLE IF NOT EXISTS devices (
 );
 CREATE INDEX IF NOT EXISTS idx_devices_driver ON devices(driver_id);
 
-CREATE TABLE IF NOT EXISTS phone_verifications (
-    verification_id TEXT PRIMARY KEY,
-    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
-    phone_e164 TEXT NOT NULL,
-    code_hash TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS phone_pairing_tokens (
+    token TEXT PRIMARY KEY,
+    driver_id TEXT NULL,
+    device_id TEXT NULL,
+    created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
-    attempts_remaining INTEGER NOT NULL DEFAULT 3,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'expired', 'failed')),
-    created_at TEXT NOT NULL
+    revoked INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_phone_verifications_driver ON phone_verifications(driver_id);
+CREATE INDEX IF NOT EXISTS idx_phone_pairing_tokens_tok ON phone_pairing_tokens(token);
 
 CREATE TABLE IF NOT EXISTS deliveries (
     delivery_id TEXT PRIMARY KEY,
@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     pickup_lat REAL NULL,
     pickup_lng REAL NULL,
     drop_lat REAL NULL,
-    drop_lng REAL NULL
+    drop_lng REAL NULL,
+    is_demo INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS assignments (
@@ -139,13 +140,6 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS users (
-    username TEXT PRIMARY KEY,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('dispatcher', 'fleet_manager', 'ops_lead')),
-    created_at TEXT NOT NULL,
-    must_change_password INTEGER NOT NULL DEFAULT 0
-);
 
 CREATE TABLE IF NOT EXISTS tracking_sessions (
     session_id TEXT PRIMARY KEY,
@@ -158,7 +152,8 @@ CREATE TABLE IF NOT EXISTS tracking_sessions (
     stopped_at TEXT NULL,
     last_ping_at TEXT NULL,
     fix_count INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped', 'stale'))
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped', 'stale')),
+    is_demo INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS gps_locations (
@@ -184,7 +179,15 @@ CREATE TABLE IF NOT EXISTS gps_locations (
     client_ip TEXT NULL,
     device_timestamp TEXT NOT NULL,
     server_timestamp TEXT NOT NULL,
-    is_valid INTEGER NOT NULL DEFAULT 1
+    is_valid INTEGER NOT NULL DEFAULT 1,
+    filtered_latitude REAL NULL,
+    filtered_longitude REAL NULL,
+    filtered_speed REAL NULL,
+    filtered_heading REAL NULL,
+    is_gated INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'device' CHECK (source IN ('device', 'simulated')),
+    kalman_sigma_pos REAL NULL,
+    mahalanobis_d2 REAL NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_gps_driver_ts ON gps_locations(driver_id, server_timestamp DESC);
@@ -230,8 +233,20 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type};")
 
-    # Users
-    add_col_if_missing("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0")
+    # Demo and GPS Pipeline columns
+    add_col_if_missing("vehicles", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("drivers", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("deliveries", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("tracking_sessions", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("gps_locations", "filtered_latitude", "REAL NULL")
+    add_col_if_missing("gps_locations", "filtered_longitude", "REAL NULL")
+    add_col_if_missing("gps_locations", "filtered_speed", "REAL NULL")
+    add_col_if_missing("gps_locations", "filtered_heading", "REAL NULL")
+    add_col_if_missing("gps_locations", "is_gated", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("gps_locations", "source", "TEXT NOT NULL DEFAULT 'device'")
+    add_col_if_missing("gps_locations", "kalman_sigma_pos", "REAL NULL")
+    add_col_if_missing("gps_locations", "mahalanobis_d2", "REAL NULL")
+
 
     # Devices
     add_col_if_missing("devices", "device_category", "TEXT NULL")

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -38,16 +39,13 @@ from app.analytics.deep_analysis import (
     detect_operational_anomalies,
 )
 from app.auth import (
-    SESSION_COOKIE_NAME,
-    check_login_rate_limit,
     check_permission,
-    clear_session_cookie,
+    generate_pairing_token,
     get_current_user,
-    is_auth_enabled,
-    record_login_failure,
-    record_login_success,
-    set_session_cookie,
-    verify_password,
+    is_loopback_client,
+    is_share_lan_active,
+    revoke_pairing_token,
+    validate_pairing_token,
 )
 from app.clock import get_current_time, utc_now_iso
 from app.config import get_gps_retention_days
@@ -176,47 +174,58 @@ async def security_headers_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
-async def require_auth_middleware(request: Request, call_next):
+async def network_access_middleware(request: Request, call_next):
     path = request.url.path
-    public_allowlist = {"/", "/health", "/auth/login", "/probe", "/probe/report"}
-    is_public = path in public_allowlist or path.startswith("/static")
 
-    # API docs authorization
-    if path in ("/docs", "/redoc", "/openapi.json"):
-        if not enable_docs:
-            return JSONResponse(status_code=404, content={"error": "NOT_FOUND", "message": "Documentation disabled."})
-        user = get_current_user(request)
-        if not user or user.get("role") != "ops_lead":
-            return JSONResponse(status_code=403, content={"error": "FORBIDDEN", "message": "API documentation requires ops_lead privilege."})
+    # Public static assets and health endpoint
+    if path == "/health" or path.startswith("/static"):
         return await call_next(request)
 
-    # Auth verification on non-public routes
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
-    is_tunnel = any(d in host.lower() for d in [".loca.lt", ".ngrok-free.app", ".trycloudflare.com"])
+    is_loopback = is_loopback_client(request)
+    share_lan = is_share_lan_active()
 
-    if (is_auth_enabled() or is_tunnel) and not is_public:
-        user = get_current_user(request)
-        if user is None:
+    # API docs authorization: strictly loopback only
+    if path in ("/docs", "/redoc", "/openapi.json"):
+        if not is_loopback:
             return JSONResponse(
-                status_code=401,
-                content={"error": "UNAUTHORIZED", "message": "Authentication required. Please log in."},
+                status_code=403,
+                content={"error": "FORBIDDEN", "message": "API documentation is accessible only via loopback (127.0.0.1)."},
             )
+        return await call_next(request)
 
-        # CSRF origin verification on state-changing requests using cookie auth
-        if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.cookies.get(SESSION_COOKIE_NAME):
-            origin = request.headers.get("origin")
-            referer = request.headers.get("referer")
-            host = request.headers.get("host", "").split(":")[0]
-            check_url = origin or referer
-            if check_url and host:
-                check_host = check_url.split("://")[-1].split("/")[0].split(":")[0]
-                if check_host.lower() not in (host.lower(), "localhost", "127.0.0.1"):
-                    return JSONResponse(
-                        status_code=403,
-                        content={"error": "CSRF_FAILED", "message": "Cross-site request forgery protection rejected this request."},
-                    )
+    # Loopback clients or LAN clients in --share mode have full dashboard and API access
+    if is_loopback or share_lan:
+        return await call_next(request)
 
-    return await call_next(request)
+    # Otherwise (remote LAN client without --share): check if path is an authorized phone route
+    is_phone_route = path.startswith("/driver") or path.startswith("/probe") or path.startswith("/tracking")
+    if is_phone_route:
+        # Extract pairing token from query params or header
+        pair_token = request.query_params.get("pair") or request.query_params.get("token")
+        if not pair_token:
+            auth_hdr = request.headers.get("authorization", "")
+            if auth_hdr.lower().startswith("bearer "):
+                pair_token = auth_hdr[7:].strip()
+            else:
+                pair_token = request.headers.get("x-pairing-token")
+
+        device_id = request.headers.get("x-device-id") or request.query_params.get("device_id")
+        valid, reason = validate_pairing_token(pair_token, device_id=device_id)
+        if not valid:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "FORBIDDEN", "message": f"Phone route access rejected: {reason}"},
+            )
+        return await call_next(request)
+
+    # Non-loopback client attempting dashboard or admin API route without --share
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": "FORBIDDEN",
+            "message": "Dashboard and API restricted to loopback (127.0.0.1). Run dual server with --share to allow LAN dashboard access.",
+        },
+    )
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -299,49 +308,75 @@ def list_probe_reports(limit: int = 50):
 
 
 # -------------------------------------------------------------------------
-# AUTHENTICATION & RBAC (B5)
+# HACKATHON ACCESS & PAIRING TOKENS (NO LOGIN)
 # -------------------------------------------------------------------------
 @app.post("/auth/login")
-async def login(request: Request, response: Response):
-    try:
-        body = await request.json()
-    except Exception:
-        raise AppError(400, "VALIDATION_ERROR", "Invalid JSON payload.") from None
-    username = str(body.get("username") or "").strip()
-    password = str(body.get("password") or "").strip()
-    if not username or not password:
-        raise AppError(400, "VALIDATION_ERROR", "Username and password are required.")
-
-    check_login_rate_limit(username)
-
-    with read_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-        if not row or not verify_password(password, row["password_hash"]):
-            record_login_failure(username)
-            raise AppError(401, "UNAUTHORIZED", "Invalid username or password.")
-        record_login_success(username)
-        user_data = {
-            "username": row["username"],
-            "role": row["role"],
-            "must_change_password": bool(row["must_change_password"]) if "must_change_password" in row.keys() else False,
-        }
-
-    token = set_session_cookie(response, user_data, request)
-    return {"message": "Logged in successfully", "user": user_data, "token": token}
+async def login():
+    return {
+        "message": "Direct access active: credentials not required in hackathon mode.",
+        "user": {"username": "operator", "role": "ops_lead"},
+    }
 
 
 @app.post("/auth/logout")
-def logout(request: Request, response: Response):
-    clear_session_cookie(response, request)
-    return {"message": "Logged out successfully"}
+def logout():
+    return {"message": "Logged out"}
 
 
 @app.get("/auth/me")
 def get_me(request: Request):
     user = get_current_user(request)
-    if not user:
-        return {"authenticated": False, "user": None}
     return {"authenticated": True, "user": user}
+
+
+@app.post("/api/pairing-tokens", status_code=201)
+async def create_pairing_token_endpoint(request: Request):
+    """Generates a >=128 bit cryptographic pairing token for phone driver telemetry access."""
+    if not is_loopback_client(request) and not is_share_lan_active():
+        raise AppError(403, "FORBIDDEN", "Pairing token generation restricted to loopback dashboard.")
+    driver_id = None
+    try:
+        body = await request.json()
+        driver_id = body.get("driver_id")
+    except Exception:
+        pass
+    token = generate_pairing_token(driver_id=driver_id)
+    return {"token": token, "driver_id": driver_id}
+
+
+@app.get("/api/pairing-tokens")
+def list_pairing_tokens_endpoint(request: Request):
+    """Lists recent pairing tokens and their binding status."""
+    if not is_loopback_client(request) and not is_share_lan_active():
+        raise AppError(403, "FORBIDDEN", "Token list restricted to loopback dashboard.")
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT token, driver_id, device_id, created_at, expires_at, revoked FROM phone_pairing_tokens ORDER BY created_at DESC LIMIT 50"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post("/api/pairing-tokens/{token}/revoke")
+def revoke_pairing_token_endpoint(token: str, request: Request):
+    """Revokes a phone pairing token."""
+    if not is_loopback_client(request) and not is_share_lan_active():
+        raise AppError(403, "FORBIDDEN", "Revoking pairing token restricted to loopback dashboard.")
+    success = revoke_pairing_token(token)
+    if not success:
+        raise AppError(404, "NOT_FOUND", "Pairing token not found.")
+    return {"status": "ok", "revoked": True, "token": token}
+
+
+@app.get("/driver", include_in_schema=False)
+def serve_driver_portal(request: Request):
+    """Driver mobile portal."""
+    driver_file = STATIC_DIR / "driver.html"
+    if driver_file.exists():
+        return FileResponse(str(driver_file))
+    return FileResponse(str(STATIC_DIR / "probe.html"))
 
 
 # -------------------------------------------------------------------------
@@ -349,6 +384,7 @@ def get_me(request: Request):
 # -------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
+    """Health check verifying database connectivity, WAL mode, foreign keys, and entity counts."""
     with read_conn() as conn:
         journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
         fk_enabled = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
@@ -409,6 +445,8 @@ def get_network_info():
         except Exception:
             pass
 
+    from app.auth import is_share_lan_active
+
     return {
         "local_ip": ip,
         "all_lan_ips": usable,
@@ -420,8 +458,63 @@ def get_network_info():
         "localhost_https_url": "https://127.0.0.1:8443",
         "has_ssl_certs": has_ssl,
         "cert_details": cert_info,
+        "is_share_lan": is_share_lan_active(),
         "secure_context_hint": "Modern mobile browsers require HTTPS (:8443) or a secure public tunnel to grant GPS location permission.",
     }
+
+
+# -------------------------------------------------------------------------
+# DEMO DATA & SIMULATOR ENDPOINTS
+# -------------------------------------------------------------------------
+@app.post("/demo/load", status_code=201)
+async def api_load_demo_data(request: Request):
+    """Loads clearly labeled demo dataset (~12 vehicles, ~15 drivers, 25 deliveries) in 1 transaction."""
+    from app.config import DEMO_CENTER_LAT, DEMO_CENTER_LON
+    from scripts.demo_data import load_demo_data
+    center_lat = DEMO_CENTER_LAT
+    center_lon = DEMO_CENTER_LON
+    try:
+        body = await request.json()
+        if body and "latitude" in body and "longitude" in body:
+            center_lat = float(body["latitude"])
+            center_lon = float(body["longitude"])
+    except Exception:
+        pass
+    res = load_demo_data(center_lat=center_lat, center_lon=center_lon)
+    broadcast_event("demo_data_loaded", res)
+    return res
+
+
+@app.post("/demo/clear")
+def api_clear_demo_data():
+    """Halts simulator and removes ONLY is_demo rows in 1 atomic transaction."""
+    from scripts.demo_data import clear_demo_data
+    res = clear_demo_data()
+    broadcast_event("demo_data_cleared", res)
+    return res
+
+
+@app.get("/demo/status")
+def api_get_demo_status():
+    """Returns isolation metrics: demo count vs real count."""
+    from scripts.demo_data import get_demo_status
+    return get_demo_status()
+
+
+@app.post("/demo/simulator/toggle")
+async def api_toggle_demo_simulator(request: Request):
+    """Toggles or sets the autonomous demo delivery simulator."""
+    from scripts.demo_data import toggle_demo_simulator
+    enable = None
+    try:
+        body = await request.json()
+        if body and "enable" in body:
+            enable = bool(body["enable"])
+    except Exception:
+        pass
+    is_running = toggle_demo_simulator(enable=enable)
+    broadcast_event("demo_simulator_toggled", {"is_running": is_running})
+    return {"status": "ok", "is_simulator_running": is_running}
 
 
 @app.get("/system/host-power")
@@ -2492,6 +2585,14 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         if body.driver_id and body.driver_id != driver_id:
             raise AppError(403, "DRIVER_MISMATCH", f"Telemetry driver '{body.driver_id}' does not match session driver '{driver_id}'.")
 
+        # Source strict separation: Demo vehicles cannot receive real device telemetry; Real cannot receive simulated
+        is_demo_sess = bool(session.get("is_demo", 0))
+        incoming_source = getattr(body, "source", None) or "device"
+        if incoming_source == "device" and is_demo_sess:
+            raise AppError(400, "SOURCE_MISMATCH", "Demo vehicle cannot receive real device telemetry.")
+        if incoming_source == "simulated" and not is_demo_sess:
+            raise AppError(400, "SOURCE_MISMATCH", "Real vehicle cannot receive simulated telemetry.")
+
         # Check device authorization & ownership (must precede session status check so revoked devices get 403)
         device_id = body.device_id or session.get("device_id")
         if device_id:
@@ -2507,13 +2608,14 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             raise AppError(400, "SESSION_INACTIVE", f"Tracking session '{body.session_id}' is currently '{session['status']}'.")
 
         # Driver explicit GPS tracking consent verification
-        if not session.get("consent_given"):
+        if not session.get("consent_given") and not is_demo_sess:
             raise AppError(403, "CONSENT_REQUIRED", "Driver GPS consent is required before streaming location coordinates.")
 
         # Anti-flooding rate limit (minimum 0.8s between fixes per session)
         last_fix = conn.execute(
             """
-            SELECT latitude, longitude, speed, server_timestamp, device_timestamp
+            SELECT latitude, longitude, speed, server_timestamp, device_timestamp,
+                   filtered_latitude, filtered_longitude, filtered_speed, filtered_heading, kalman_sigma_pos
             FROM gps_locations
             WHERE session_id = ?
             ORDER BY server_timestamp DESC, rowid DESC
@@ -2526,6 +2628,7 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         now_dt = get_current_time()
         ts_validity = evaluate_timestamp_validity(body.device_timestamp, now_str)
 
+        delta_dev_s = 1.0
         if last_fix:
             try:
                 prev_srv_dt = datetime.fromisoformat(last_fix["server_timestamp"].replace("Z", "+00:00"))
@@ -2590,15 +2693,85 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         loc_id = f"LOC-{uuid.uuid4().hex[:10].upper()}"
         speed_source = "reported" if body.speed is not None else ("derived" if kin["derived_speed_mps"] is not None else "none")
 
+        # ---------------------------------------------------------------------
+        # REAL-GPS PIPELINE (Kalman, Outlier Gating, Analytical Confidence, ETA)
+        # ---------------------------------------------------------------------
+        from app.gps_pipeline import (
+            KalmanFilter2D,
+            calculate_eta_and_progress,
+            calculate_position_confidence,
+            check_geofence_arrival,
+            equirectangular_project,
+            get_accuracy_quality_label,
+            inv_equirectangular_project,
+        )
+
+        filtered_lat = body.latitude
+        filtered_lon = body.longitude
+        filtered_spd = body.speed or (kin["derived_speed_mps"] if kin.get("derived_speed_mps") is not None else 0.0)
+        filtered_hdg = body.heading or 0.0
+        is_gated = 0
+        kalman_sigma_pos = body.accuracy
+        mahalanobis_d2 = 0.0
+
+        if last_fix and "filtered_latitude" in last_fix.keys() and last_fix["filtered_latitude"] is not None:
+            dt = max(0.5, min(10.0, delta_dev_s))
+            lat0 = last_fix["filtered_latitude"]
+            lon0 = last_fix["filtered_longitude"]
+            zx, zy = equirectangular_project(body.latitude, body.longitude, lat0, lon0)
+            kf = KalmanFilter2D(init_x=0.0, init_y=0.0, init_accuracy=last_fix["kalman_sigma_pos"] or body.accuracy)
+            kf.predict(dt)
+            fx, fy, fvx, fvy, gated, d2, sig_pos = kf.update(zx, zy, accuracy_m=body.accuracy)
+            filtered_lat, filtered_lon = inv_equirectangular_project(fx, fy, lat0, lon0)
+            filtered_spd = math.hypot(fvx, fvy)
+            filtered_hdg = (math.degrees(math.atan2(fvx, fvy)) + 360.0) % 360.0
+            is_gated = 1 if gated else 0
+            kalman_sigma_pos = sig_pos
+            mahalanobis_d2 = d2
+
+        pos_conf = calculate_position_confidence(kalman_sigma_pos, radius_m=10.0)
+        acc_label = get_accuracy_quality_label(body.accuracy)
+
+        # Geofence & ETA computation
+        eta_payload = None
+        if delivery_id:
+            del_row = conn.execute(
+                "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng, status FROM deliveries WHERE delivery_id = ?",
+                (delivery_id,),
+            ).fetchone()
+            if del_row and del_row["drop_lat"] is not None and del_row["drop_lng"] is not None:
+                p_lat = del_row["pickup_lat"] or filtered_lat
+                p_lon = del_row["pickup_lng"] or filtered_lon
+                d_lat = del_row["drop_lat"]
+                d_lon = del_row["drop_lng"]
+
+                speed_kmh = max(5.0, float(filtered_spd) * 3.6)
+                eta_payload = calculate_eta_and_progress(
+                    filtered_lat, filtered_lon, d_lat, d_lon, p_lat, p_lon, [speed_kmh], sigma_pos=kalman_sigma_pos
+                )
+                arrived, _dist_m, _arr_conf = check_geofence_arrival(
+                    filtered_lat, filtered_lon, d_lat, d_lon,
+                    sigma_pos=kalman_sigma_pos,
+                    radius_m=50.0,
+                    sustained_seconds=delta_dev_s,
+                )
+                if arrived and del_row["status"] == "in_transit":
+                    conn.execute(
+                        "UPDATE deliveries SET status = 'delivered', version = version + 1 WHERE delivery_id = ?",
+                        (delivery_id,),
+                    )
+
         conn.execute(
             """
             INSERT INTO gps_locations (
                 location_id, session_id, driver_id, device_id, vehicle_id, delivery_id,
                 latitude, longitude, accuracy, altitude, altitude_accuracy, speed, heading,
                 derived_speed, speed_source, distance_from_prev_m, time_delta_prev_s,
-                is_implausible_jump, quality_flag, client_ip, device_timestamp, server_timestamp, is_valid
+                is_implausible_jump, quality_flag, client_ip, device_timestamp, server_timestamp, is_valid,
+                filtered_latitude, filtered_longitude, filtered_speed, filtered_heading, is_gated, source,
+                kalman_sigma_pos, mahalanobis_d2
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 loc_id,
@@ -2623,6 +2796,14 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
                 client_ip,
                 body.device_timestamp,
                 now_str,
+                filtered_lat,
+                filtered_lon,
+                filtered_spd,
+                filtered_hdg,
+                is_gated,
+                incoming_source,
+                kalman_sigma_pos,
+                mahalanobis_d2,
             ),
         )
 
@@ -2661,6 +2842,9 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             "device_timestamp": body.device_timestamp,
             "server_timestamp": now_str,
             "is_valid": True,
+            "accuracy_quality_label": acc_label,
+            "position_confidence": pos_conf,
+            "eta": eta_payload,
             "street_view_url": make_street_view_url(body.latitude, body.longitude),
         }
 

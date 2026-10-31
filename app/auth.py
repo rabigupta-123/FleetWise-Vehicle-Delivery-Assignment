@@ -1,199 +1,136 @@
 """
-FleetWise — Authentication, Session Security & RBAC Module.
-Provides secure Scrypt password hashing, HMAC-SHA256 session cookies,
-rate-limited authentication challenges, and strict role-based access control.
+FleetWise — Network Access, Loopback Guard & Phone Pairing Module.
+Hackathon architecture: Zero login credentials or passwords.
+Admin / Dashboard routes restricted to loopback clients (127.0.0.1, ::1) unless --share is enabled.
+Mobile phone access permitted ONLY to driver routes via cryptographically random pairing tokens (>= 128-bit).
 """
-import base64
-import hashlib
-import hmac
-import json
 import os
 import secrets
-import time
+from datetime import UTC, datetime, timedelta
 
-from fastapi import Request, Response
+from fastapi import Request
 
-from app.errors import AppError
+from app.db import get_connection
 
-SESSION_COOKIE_NAME = "fleetwise_session"
-
-# Secret key for HMAC-SHA256 session tokens.
-# Refuses placeholder secret unless in insecure dev mode.
-_env_secret = os.environ.get("SESSION_SECRET_KEY")
-if _env_secret and len(_env_secret) >= 32 and "placeholder" not in _env_secret:
-    SECRET_KEY = _env_secret.encode("utf-8")
-elif os.environ.get("FLEETWISE_INSECURE_DEV") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
-    # Ephemeral dev/test secret
-    SECRET_KEY = secrets.token_bytes(32)
-else:
-    # Default to a generated 32-byte secret per server process lifetime
-    SECRET_KEY = secrets.token_bytes(32)
-
-# Revoked session tokens & JTIs for logout invalidation
-REVOKED_TOKENS: set[str] = set()
-
-# Login attempt tracking for rate limiting & lockout: identifier -> list of timestamps
-_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+# Allowed loopback client addresses
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
-def is_auth_enabled() -> bool:
-    """Authentication is enabled when explicitly activated via REQUIRE_AUTH=1 or FORCE_AUTH=1."""
-    return os.environ.get("REQUIRE_AUTH", "").lower() in ("1", "true", "yes") or os.environ.get("FORCE_AUTH", "").lower() in ("1", "true", "yes")
+def is_share_lan_active() -> bool:
+    """Returns True if the dashboard has been opened to LAN clients via --share."""
+    return os.environ.get("FLEETWISE_SHARE_LAN") == "1"
 
 
-def check_login_rate_limit(identifier: str) -> None:
-    now = time.time()
-    attempts = _LOGIN_ATTEMPTS.get(identifier, [])
-    # Retain attempts within the last 5 minutes (300 seconds)
-    recent = [t for t in attempts if now - t < 300]
-    _LOGIN_ATTEMPTS[identifier] = recent
-    if len(recent) >= 5:
-        backoff_sec = int(60 * (2 ** min(len(recent) - 5, 4)))
-        raise AppError(
-            429,
-            "RATE_LIMITED",
-            f"Too many failed login attempts for this account. Locked out for {backoff_sec} seconds.",
-        )
-
-
-def record_login_failure(identifier: str) -> None:
-    _LOGIN_ATTEMPTS.setdefault(identifier, []).append(time.time())
-
-
-def record_login_success(identifier: str) -> None:
-    _LOGIN_ATTEMPTS.pop(identifier, None)
-
-
-def hash_password(password: str, salt: str | None = None) -> str:
-    if not salt:
-        salt = secrets.token_hex(16)
-    hashed = hashlib.scrypt(password.encode("utf-8"), salt=salt.encode("utf-8"), n=16384, r=8, p=1).hex()
-    return f"{salt}:{hashed}"
-
-
-def verify_password(password: str, hashed_str: str) -> bool:
-    try:
-        salt, hashed = hashed_str.split(":", 1)
-        expected = hashlib.scrypt(password.encode("utf-8"), salt=salt.encode("utf-8"), n=16384, r=8, p=1).hex()
-        return hmac.compare_digest(expected, hashed)
-    except Exception:
+def is_loopback_client(request: Request) -> bool:
+    """
+    Checks if client originates from loopback (127.0.0.1 / ::1).
+    STRICTLY ignores X-Forwarded-For to prevent header spoofing from external networks.
+    """
+    if not request.client:
         return False
+    host = request.client.host
+    return host in LOOPBACK_HOSTS
 
 
-def sign_session_data(data: dict) -> str:
-    payload = data.copy()
-    if "exp" not in payload:
-        payload["exp"] = time.time() + 86400  # 24 hours expiry
-    if "jti" not in payload:
-        payload["jti"] = secrets.token_hex(12)
+def generate_pairing_token(driver_id: str | None = None, valid_hours: int = 24) -> str:
+    """
+    Generates a secure 192-bit URL-safe pairing token (>= 128 bits) for phone access.
+    Single-device bound upon first telemetry transmission.
+    """
+    token = secrets.token_urlsafe(24)  # 192 bits of entropy
+    now = datetime.now(UTC)
+    expires_at = (now + timedelta(hours=valid_hours)).isoformat()
 
-    raw_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    b64_data = base64.urlsafe_b64encode(raw_json).decode("utf-8")
-    sig = hmac.new(SECRET_KEY, b64_data.encode("utf-8"), hashlib.sha256).hexdigest()
-    return f"{b64_data}.{sig}"
-
-
-def verify_session_token(token: str) -> dict | None:
+    conn = get_connection()
     try:
-        if not token or "." not in token:
-            return None
-        if token in REVOKED_TOKENS:
-            return None
-        b64_data, sig = token.split(".", 1)
-        expected_sig = hmac.new(SECRET_KEY, b64_data.encode("utf-8"), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected_sig):
-            return None
-        raw_json = base64.urlsafe_b64decode(b64_data.encode("utf-8")).decode("utf-8")
-        payload = json.loads(raw_json)
+        conn.execute(
+            """
+            INSERT INTO phone_pairing_tokens (token, driver_id, device_id, created_at, expires_at, revoked)
+            VALUES (?, ?, NULL, ?, ?, 0)
+            """,
+            (token, driver_id, now.isoformat(), expires_at),
+        )
+    finally:
+        conn.close()
 
-        # Check expiry
-        if payload.get("exp") and time.time() > payload["exp"]:
-            return None
-        # Check token JTI revocation
-        if payload.get("jti") in REVOKED_TOKENS:
-            return None
-
-        return payload
-    except Exception:
-        return None
-
-
-def get_current_user(request: Request | None) -> dict | None:
-    if request is None:
-        return None
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        auth_hdr = request.headers.get("Authorization", "")
-        if auth_hdr.startswith("Bearer "):
-            token = auth_hdr[7:].strip()
-    return verify_session_token(token) if token else None
-
-
-def set_session_cookie(response: Response, user_data: dict, request: Request | None = None) -> str:
-    token = sign_session_data(user_data)
-    is_secure = False
-    if request:
-        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        is_secure = proto.lower() == "https"
-
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="strict",
-        secure=is_secure,
-        max_age=86400,
-    )
     return token
 
 
-def clear_session_cookie(response: Response, request: Request | None = None) -> None:
+def validate_pairing_token(token: str | None, device_id: str | None = None) -> tuple[bool, str]:
+    """
+    Validates a phone pairing token:
+    1. Must exist.
+    2. Must not be revoked.
+    3. Must not be expired.
+    4. Must match bound device_id if previously bound; binds device_id if unbound.
+    Returns (is_valid, reason).
+    """
+    if not token or not token.strip():
+        return False, "Missing pairing token"
+
+    token = token.strip()
+    now_iso = datetime.now(UTC).isoformat()
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM phone_pairing_tokens WHERE token = ?",
+            (token,),
+        ).fetchone()
+
+        if not row:
+            return False, "Invalid pairing token"
+
+        if row["revoked"]:
+            return False, "Pairing token has been revoked"
+
+        if row["expires_at"] < now_iso:
+            return False, "Pairing token has expired"
+
+        bound_dev = row["device_id"]
+        if bound_dev:
+            if device_id and bound_dev != device_id:
+                return False, f"Token bound to device '{bound_dev}'; cannot be used by '{device_id}'"
+        elif device_id:
+            # Bind token to first device that connects
+            conn.execute(
+                "UPDATE phone_pairing_tokens SET device_id = ? WHERE token = ?",
+                (device_id, token),
+            )
+
+        return True, "Valid pairing token"
+    finally:
+        conn.close()
+
+
+def revoke_pairing_token(token: str) -> bool:
+    """Revokes an active pairing token."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "UPDATE phone_pairing_tokens SET revoked = 1 WHERE token = ?",
+            (token,),
+        )
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+# Compatibility helpers for existing handlers
+def get_current_user(request: Request | None = None) -> dict | None:
+    """In hackathon mode without login, returns self-declared operator metadata."""
     if request:
-        token = request.cookies.get(SESSION_COOKIE_NAME)
-        if token:
-            REVOKED_TOKENS.add(token)
-            payload = verify_session_token(token)
-            if payload and payload.get("jti"):
-                REVOKED_TOKENS.add(payload["jti"])
-    response.delete_cookie(key=SESSION_COOKIE_NAME, httponly=True, samesite="strict")
-
-
-# RBAC Role Permission Matrix
-ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "dispatcher": {"deliveries", "assign", "status", "advisor", "read", "events", "tracking"},
-    "fleet_manager": {"vehicles", "drivers", "devices", "import", "read", "events", "tracking"},
-    "ops_lead": {
-        "read",
-        "metrics",
-        "audit",
-        "race_lab",
-        "deliveries",
-        "vehicles",
-        "drivers",
-        "devices",
-        "assign",
-        "status",
-        "import",
-        "advisor",
-        "events",
-        "tracking",
-        "export",
-        "diagnostics",
-    },
-}
+        op_name = request.headers.get("x-operator-name")
+        if op_name:
+            return {"username": op_name.strip(), "role": "ops_lead"}
+    return {"username": "operator", "role": "ops_lead"}
 
 
 def check_permission(user: dict | None, required_perm: str, request: Request | None = None) -> None:
-    """Enforces strict RBAC role authorization on all protected resources."""
-    if is_auth_enabled():
-        if user is None:
-            raise AppError(401, "UNAUTHORIZED", "Authentication required. Please log in.")
-    else:
-        # Insecure dev mode: allow unauthenticated requests with operator fallback
-        if user is None:
-            return
+    """No-op in open hackathon mode."""
+    return None
 
-    role = user.get("role", "operator")
-    allowed = ROLE_PERMISSIONS.get(role, set())
-    if required_perm not in allowed and "ops_lead" not in role:
-        raise AppError(403, "FORBIDDEN", f"Role '{role}' is not authorized to access '{required_perm}'.")
+
+def is_auth_enabled() -> bool:
+    """Always False in hackathon mode (no login required)."""
+    return False

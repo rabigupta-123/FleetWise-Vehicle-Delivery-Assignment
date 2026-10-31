@@ -183,6 +183,7 @@ class GPSLocationCreate(BaseModel):
     altitude_accuracy: float | None = Field(default=None, ge=0.0)
     speed: float | None = Field(default=None, ge=0.0)
     heading: float | None = Field(default=None, ge=0.0, le=360.0)
+    source: str = Field(default="device", pattern="^(device|simulated)$")
     device_timestamp: str = Field(..., min_length=1)
 
     @field_validator("device_timestamp")

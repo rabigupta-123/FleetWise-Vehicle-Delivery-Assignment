@@ -160,14 +160,42 @@
             <kbd class="kbd-hint">Ctrl+K</kbd>
           </button>
 
+          <div class="operator-input-container" style="display: inline-flex; align-items: center; margin-right: 4px;">
+            <input type="text" id="operator-name-input" class="form-input" style="height: 30px; font-size: 11px; padding: 2px 8px; width: 140px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);" placeholder="Operator (Unauth)" title="Self-declared unauthenticated operator name attached to audit events" />
+          </div>
+
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-load-demo" title="Load synthetic demo fleet &amp; deliveries">
+            <span data-icon="play"></span>
+            <span class="hide-sm">Demo Data</span>
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-demo" title="Clear synthetic demo data (preserves real assets)">
+            <span data-icon="trash"></span>
+            <span class="hide-sm">Clear Demo</span>
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-sim-toggle" title="Toggle Demo Physics Simulator">
+            <span data-icon="zap"></span>
+            <span id="sim-status-label" class="hide-sm">Sim: Paused</span>
+          </button>
+
           <button type="button" class="btn btn-primary btn-sm" id="btn-quick-dispatch">
             <span data-icon="dispatch"></span>
             <span>Dispatch</span>
           </button>
-
-
         </div>
       </header>
+
+      <!-- LAN Share Security Warning Banner -->
+      <div id="share-lan-banner" class="server-error-banner hidden" style="background: rgba(220, 38, 38, 0.95); border-color: #b91c1c; color: #ffffff;" role="alert" aria-live="polite">
+        <div class="server-error-content">
+          <span class="server-error-icon" data-icon="shieldAlert"></span>
+          <div class="server-error-text">
+            <span class="server-error-code" style="background: #7f1d1d; color: #fff;">SECURITY WARNING (--share)</span>
+            <span class="server-error-message" style="color: #fff; font-weight: 500;">
+              Anyone on this local network can view and control FleetWise without authentication. Do not use on untrusted Wi-Fi.
+            </span>
+          </div>
+        </div>
+      </div>
 
       <!-- Global Verbatim Server Error Banner -->
       <div id="global-error-banner" class="server-error-banner hidden" role="alert" aria-live="assertive" tabindex="-1">

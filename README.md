@@ -225,7 +225,7 @@ python scripts/run_dual_server.py
 ## 🧪 Test Suite & Quality Status
 
 <!-- BEGIN:TEST_COUNTS -->
-**77 Passed** / **77 Total** (100% pass rate)
+**78 Passed** / **78 Total** (100% pass rate)
 <!-- END:TEST_COUNTS -->
 
 ### Running the Complete Test & Quality Suite:
@@ -289,6 +289,9 @@ The following routes are generated directly from the running FastAPI application
 | `GET` | `/analytics/summary` | Yes | `ops_lead` | Operational endpoint |
 | `GET` | `/analytics/telemetry` | Yes | `ops_lead` | Aggregated telemetry volume, quality distribution, and kinematics statistics. |
 | `GET` | `/analytics/vehicles/{vehicle_id}` | Yes | `fleet_manager, ops_lead` | Detailed operational metrics and telemetry stats for a single vehicle. |
+| `GET` | `/api/pairing-tokens` | Yes | `ops_lead` | Lists recent pairing tokens and their binding status. |
+| `POST` | `/api/pairing-tokens` | Yes | `ops_lead` | Generates a >=128 bit cryptographic pairing token for phone driver telemetry access. |
+| `POST` | `/api/pairing-tokens/{token}/revoke` | Yes | `ops_lead` | Revokes a phone pairing token. |
 | `GET` | `/audit` | Yes | `ops_lead` | Operational endpoint |
 | `POST` | `/auth/login` | No | `Public` | Operational endpoint |
 | `POST` | `/auth/logout` | Yes | `Any Authenticated` | Operational endpoint |
@@ -302,6 +305,10 @@ The following routes are generated directly from the running FastAPI application
 | `POST` | `/deliveries/{delivery_id}/assign` | Yes | `dispatcher, ops_lead` | Atomically assign a vehicle and driver to a pending delivery. |
 | `GET` | `/deliveries/{delivery_id}/recommendations` | Yes | `dispatcher, ops_lead` | Operational endpoint |
 | `PATCH` | `/deliveries/{delivery_id}/status` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `POST` | `/demo/clear` | Yes | `ops_lead` | Halts simulator and removes ONLY is_demo rows in 1 atomic transaction. |
+| `POST` | `/demo/load` | Yes | `ops_lead` | Loads clearly labeled demo dataset (~12 vehicles, ~15 drivers, 25 deliveries) in 1 transaction. |
+| `POST` | `/demo/simulator/toggle` | Yes | `ops_lead` | Toggles or sets the autonomous demo delivery simulator. |
+| `GET` | `/demo/status` | Yes | `ops_lead` | Returns isolation metrics: demo count vs real count. |
 | `GET` | `/devices` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/devices/probe-reports` | Yes | `fleet_manager, ops_lead` | Retrieves list of captured device probe reports. |
 | `POST` | `/devices/register` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
@@ -310,6 +317,7 @@ The following routes are generated directly from the running FastAPI application
 | `POST` | `/devices/{device_id}/revoke` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/devices/{device_id}/telemetry` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `POST` | `/diagnostics/concurrency-test` | Yes | `ops_lead` | Executes N parallel assignment attempts against an ISOLATED temporary database |
+| `GET` | `/driver` | Yes | `ops_lead` | Driver mobile portal. |
 | `GET` | `/drivers` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `POST` | `/drivers` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `PATCH` | `/drivers/{driver_id}/phone` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
@@ -318,7 +326,7 @@ The following routes are generated directly from the running FastAPI application
 | `PATCH` | `/drivers/{driver_id}/status` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/events` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/export/{entity}.csv` | Yes | `ops_lead` | Operational endpoint |
-| `GET` | `/health` | No | `Public` | Operational endpoint |
+| `GET` | `/health` | No | `Public` | Health check verifying database connectivity, WAL mode, foreign keys, and entity counts. |
 | `GET` | `/import/templates/{entity}.csv` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `POST` | `/import/{entity}` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/metrics` | Yes | `ops_lead` | Operational endpoint |

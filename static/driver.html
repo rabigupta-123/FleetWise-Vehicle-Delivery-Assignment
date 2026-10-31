@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FleetWise // Driver Portal & Telemetry Hub</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <style>
+    :root {
+      --brand-primary: #7C3AED;
+      --brand-accent: #06B6D4;
+      --bg-dark: #0A0A14;
+      --card-bg: rgba(22, 22, 38, 0.85);
+      --border-glow: rgba(124, 58, 237, 0.3);
+    }
+    body {
+      background: radial-gradient(circle at 50% 0%, #1E103A 0%, var(--bg-dark) 70%);
+      color: #E2E8F0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 16px;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .driver-container {
+      max-width: 540px;
+      margin: 0 auto;
+    }
+    .driver-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-glow);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .logo-badge {
+      font-weight: 800;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #A78BFA 0%, #06B6D4 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .live-chip {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34D399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .live-chip::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10B981;
+      box-shadow: 0 0 8px #10B981;
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric-box {
+      background: rgba(15, 15, 26, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .metric-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94A3B8;
+      margin-bottom: 4px;
+    }
+    .metric-value {
+      font-size: 20px;
+      font-weight: 800;
+      color: #F8FAFC;
+    }
+    .metric-sub {
+      font-size: 11px;
+      color: #64748B;
+      margin-top: 2px;
+    }
+    .quality-pill {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+    }
+    .quality-excellent { background: rgba(16, 185, 129, 0.2); color: #34D399; }
+    .quality-good { background: rgba(59, 130, 246, 0.2); color: #60A5FA; }
+    .quality-fair { background: rgba(245, 158, 11, 0.2); color: #FBBF24; }
+    .quality-poor { background: rgba(239, 68, 68, 0.2); color: #F87171; }
+    .btn-action {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .btn-start {
+      background: linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%);
+      color: white;
+      box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
+    }
+    .btn-stop {
+      background: rgba(239, 68, 68, 0.15);
+      color: #F87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .warning-banner {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #FBBF24;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .error-banner {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #F87171;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .transparency-drawer {
+      margin-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 12px;
+    }
+    .transparency-btn {
+      background: none;
+      border: none;
+      color: #94A3B8;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .json-box {
+      background: #05050A;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      color: #A5F3FC;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 8px;
+      display: none;
+    }
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #E2E8F0;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      float: right;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="driver-container">
+    <!-- Browser / Context Warning -->
+    <div id="in-app-warning" class="warning-banner">
+      ⚠️ <strong>In-App Browser Detected:</strong> Location updates may stall when minimized. Tap <strong>•••</strong> and choose <strong>"Open in Chrome / Safari"</strong> for reliable background telemetry.
+    </div>
+
+    <div id="insecure-warning" class="error-banner">
+      🔒 <strong>Insecure HTTP Context:</strong> Modern mobile browsers strictly forbid GPS location access over unencrypted HTTP. Connect via HTTPS (:8443) or localhost.
+    </div>
+
+    <div id="token-error" class="error-banner">
+      🚫 <strong>Pairing Token Error:</strong> <span id="token-error-msg">Invalid or missing pairing token. Scan the QR code from the FleetWise desktop dashboard.</span>
+    </div>
+
+    <!-- Main Active Card -->
+    <div class="driver-card">
+      <div class="header-row">
+        <div class="logo-badge">⚡ FleetWise Mobile</div>
+        <div id="stream-status" class="live-chip">STANDBY</div>
+      </div>
+
+      <div style="font-size: 13px; color: #94A3B8; margin-bottom: 8px;">
+        Driver Token: <span id="token-display" style="font-family: monospace; color: #C084FC;">Checking...</span>
+      </div>
+
+      <!-- Real-time Metrics -->
+      <div class="metric-grid">
+        <div class="metric-box">
+          <div class="metric-label">GPS Accuracy</div>
+          <div id="acc-val" class="metric-value">--</div>
+          <div id="acc-badge" class="metric-sub"><span class="quality-pill quality-good">READY</span></div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Estimated Speed</div>
+          <div id="spd-val" class="metric-value">0.0 km/h</div>
+          <div id="heading-val" class="metric-sub">Hdg: --°</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Battery Level</div>
+          <div id="bat-val" class="metric-value">--%</div>
+          <div id="bat-status" class="metric-sub">Checking API...</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Offline Buffer</div>
+          <div id="buffer-val" class="metric-value">0 fixes</div>
+          <div id="buffer-sub" class="metric-sub">Synced to cloud</div>
+        </div>
+      </div>
+
+      <!-- Main Action Button -->
+      <button id="btn-toggle-stream" class="btn-action btn-start">
+        <span id="btn-icon">▶</span> <span id="btn-text">Start Location Streaming</span>
+      </button>
+
+      <!-- Transparency Drawer -->
+      <div class="transparency-drawer">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <button id="toggle-json-btn" class="transparency-btn">
+            👁️ What my phone shares with FleetWise ▼
+          </button>
+          <button id="copy-json-btn" class="copy-btn" style="display: none;">Copy JSON</button>
+        </div>
+        <pre id="json-viewer" class="json-box"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let isStreaming = false;
+    let watchId = null;
+    let wakeLock = null;
+    let pairingToken = null;
+    let deviceId = localStorage.getItem("fleetwise_device_id") || ("dev_" + Math.random().toString(36).substring(2, 10));
+    localStorage.setItem("fleetwise_device_id", deviceId);
+
+    let lastFix = null;
+    let bufferedFixes = [];
+
+    // Parse Pairing Token from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    pairingToken = urlParams.get("pair") || urlParams.get("token");
+
+    const tokenDisplay = document.getElementById("token-display");
+    if (pairingToken) {
+      tokenDisplay.textContent = pairingToken.substring(0, 10) + "...";
+    } else {
+      tokenDisplay.textContent = "NO TOKEN DETECTED";
+      document.getElementById("token-error").style.display = "block";
+    }
+
+    // 1. Secure Context Check
+    if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+      document.getElementById("insecure-warning").style.display = "block";
+    }
+
+    // 2. In-App Browser Detection (WhatsApp, Instagram, FB, Line, etc.)
+    const ua = navigator.userAgent || "";
+    const isInApp = /FBAN|FBAV|Instagram|WhatsApp|Line|Twitter|MicroMessenger/i.test(ua);
+    if (isInApp) {
+      document.getElementById("in-app-warning").style.display = "block";
+    }
+
+    // 3. Battery API telemetry
+    let batteryState = { value: null, status: "unavailable", source: "BatteryManager", reason: "API not supported" };
+    if ("getBattery" in navigator) {
+      navigator.getBattery().then(bat => {
+        const updateBat = () => {
+          batteryState = {
+            value: Math.round(bat.level * 100),
+            status: "measured",
+            is_charging: bat.charging,
+            source: "BatteryManager",
+            measured_at: new Date().toISOString()
+          };
+          document.getElementById("bat-val").textContent = batteryState.value + "%";
+          document.getElementById("bat-status").textContent = bat.charging ? "⚡ Charging" : "🔋 Discharging";
+          updateInspector();
+        };
+        updateBat();
+        bat.addEventListener("levelchange", updateBat);
+        bat.addEventListener("chargingchange", updateBat);
+      }).catch(err => {
+        batteryState = { value: null, status: "error", source: "BatteryManager", reason: err.message };
+      });
+    }
+
+    // 4. Wake Lock API (keep screen awake while driving)
+    async function requestWakeLock() {
+      if ("wakeLock" in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request("screen");
+        } catch (e) {
+          console.warn("Wake lock request failed", e);
+        }
+      }
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock) {
+        wakeLock.release().then(() => wakeLock = null).catch(() => {});
+      }
+    }
+
+    // 5. GPS Streaming
+    const toggleBtn = document.getElementById("btn-toggle-stream");
+    const streamStatus = document.getElementById("stream-status");
+
+    toggleBtn.addEventListener("click", () => {
+      if (!isStreaming) {
+        startStreaming();
+      } else {
+        stopStreaming();
+      }
+    });
+
+    function startStreaming() {
+      if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+      }
+      isStreaming = true;
+      toggleBtn.className = "btn-action btn-stop";
+      document.getElementById("btn-icon").textContent = "⏹";
+      document.getElementById("btn-text").textContent = "Stop Location Streaming";
+      streamStatus.textContent = "STREAMING LIVE";
+      streamStatus.style.background = "rgba(16, 185, 129, 0.25)";
+
+      requestWakeLock();
+
+      watchId = navigator.geolocation.watchPosition(
+        handleGeoSuccess,
+        handleGeoError,
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 }
+      );
+    }
+
+    function stopStreaming() {
+      isStreaming = false;
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      releaseWakeLock();
+
+      toggleBtn.className = "btn-action btn-start";
+      document.getElementById("btn-icon").textContent = "▶";
+      document.getElementById("btn-text").textContent = "Start Location Streaming";
+      streamStatus.textContent = "STANDBY";
+      streamStatus.style.background = "rgba(16, 185, 129, 0.15)";
+    }
+
+    function handleGeoSuccess(pos) {
+      const crd = pos.coords;
+      const acc = crd.accuracy;
+      document.getElementById("acc-val").textContent = "±" + acc.toFixed(1) + "m";
+
+      // Accuracy Quality Tier
+      const accBadge = document.getElementById("acc-badge");
+      if (acc <= 5) {
+        accBadge.innerHTML = '<span class="quality-pill quality-excellent">Excellent</span>';
+      } else if (acc <= 15) {
+        accBadge.innerHTML = '<span class="quality-pill quality-good">Good</span>';
+      } else if (acc <= 50) {
+        accBadge.innerHTML = '<span class="quality-pill quality-fair">Fair</span>';
+      } else {
+        accBadge.innerHTML = '<span class="quality-pill quality-poor">Poor</span>';
+      }
+
+      const spdKmh = crd.speed !== null && crd.speed >= 0 ? (crd.speed * 3.6).toFixed(1) : "0.0";
+      document.getElementById("spd-val").textContent = spdKmh + " km/h";
+      document.getElementById("heading-val").textContent = crd.heading !== null ? "Hdg: " + crd.heading.toFixed(0) + "°" : "Hdg: --°";
+
+      const payload = {
+        session_id: "TRK-DRIVER-MOBILE",
+        device_id: deviceId,
+        latitude: crd.latitude,
+        longitude: crd.longitude,
+        accuracy: crd.accuracy,
+        altitude: crd.altitude,
+        altitude_accuracy: crd.altitudeAccuracy,
+        speed: crd.speed,
+        heading: crd.heading,
+        source: "device",
+        device_timestamp: new Date(pos.timestamp).toISOString(),
+        battery: batteryState
+      };
+
+      lastFix = payload;
+      updateInspector();
+
+      // Transmit to server
+      transmitFix(payload);
+    }
+
+    function handleGeoError(err) {
+      console.error("GPS Error:", err);
+      document.getElementById("acc-val").textContent = "DENIED";
+      document.getElementById("acc-badge").innerHTML = '<span class="quality-pill quality-poor">' + err.message + '</span>';
+    }
+
+    async function transmitFix(fix) {
+      const headers = {
+        "Content-Type": "application/json",
+        "x-device-id": deviceId
+      };
+      if (pairingToken) {
+        headers["x-pairing-token"] = pairingToken;
+      }
+
+      try {
+        const url = `/tracking/location${pairingToken ? '?pair=' + encodeURIComponent(pairingToken) : ''}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify(fix)
+        });
+
+        if (res.ok) {
+          // Flush any offline buffered fixes
+          if (bufferedFixes.length > 0) {
+            flushBuffer();
+          }
+        } else {
+          bufferFix(fix);
+        }
+      } catch (networkErr) {
+        bufferFix(fix);
+      }
+    }
+
+    function bufferFix(fix) {
+      bufferedFixes.push(fix);
+      if (bufferedFixes.length > 500) bufferedFixes.shift();
+      document.getElementById("buffer-val").textContent = bufferedFixes.length + " fixes";
+      document.getElementById("buffer-sub").textContent = "Buffering offline";
+    }
+
+    async function flushBuffer() {
+      document.getElementById("buffer-sub").textContent = "Syncing buffer...";
+      while (bufferedFixes.length > 0) {
+        const item = bufferedFixes.shift();
+        try {
+          const url = `/tracking/location${pairingToken ? '?pair=' + encodeURIComponent(pairingToken) : ''}`;
+          await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-pairing-token": pairingToken, "x-device-id": deviceId },
+            body: JSON.stringify(item)
+          });
+        } catch (e) {
+          bufferedFixes.unshift(item);
+          break;
+        }
+      }
+      document.getElementById("buffer-val").textContent = bufferedFixes.length + " fixes";
+      document.getElementById("buffer-sub").textContent = bufferedFixes.length === 0 ? "Synced to cloud" : "Buffering offline";
+    }
+
+    // 6. "What My Phone Shares" Transparency Inspector
+    const toggleJsonBtn = document.getElementById("toggle-json-btn");
+    const jsonViewer = document.getElementById("json-viewer");
+    const copyJsonBtn = document.getElementById("copy-json-btn");
+
+    toggleJsonBtn.addEventListener("click", () => {
+      const isHidden = jsonViewer.style.display === "none" || !jsonViewer.style.display;
+      jsonViewer.style.display = isHidden ? "block" : "none";
+      copyJsonBtn.style.display = isHidden ? "inline-block" : "none";
+      toggleJsonBtn.textContent = isHidden ? "👁️ What my phone shares with FleetWise ▲" : "👁️ What my phone shares with FleetWise ▼";
+    });
+
+    copyJsonBtn.addEventListener("click", () => {
+      if (lastFix) {
+        navigator.clipboard.writeText(JSON.stringify(lastFix, null, 2)).then(() => {
+          copyJsonBtn.textContent = "Copied!";
+          setTimeout(() => copyJsonBtn.textContent = "Copy JSON", 2000);
+        });
+      }
+    });
+
+    function updateInspector() {
+      if (lastFix) {
+        jsonViewer.textContent = JSON.stringify(lastFix, null, 2);
+      } else {
+        jsonViewer.textContent = JSON.stringify({
+          status: "Waiting for first GPS fix...",
+          battery_telemetry: batteryState,
+          device_id: deviceId,
+          pairing_token: pairingToken ? pairingToken.substring(0, 8) + "..." : "none"
+        }, null, 2);
+      }
+    }
+    updateInspector();
+  </script>
+</body>
+</html>

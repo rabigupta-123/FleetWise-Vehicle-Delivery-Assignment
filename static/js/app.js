@@ -185,6 +185,15 @@ function clearGlobalError() {
 }
 
 async function apiRequest(path, options = {}) {
+  const opName = localStorage.getItem('fleetwise_operator_name');
+  if (opName) {
+    options.headers = options.headers || {};
+    if (options.headers instanceof Headers) {
+      options.headers.set('X-Operator-Name', opName);
+    } else {
+      options.headers['X-Operator-Name'] = opName;
+    }
+  }
   const res = await fetch(path, options);
   const contentType = res.headers.get('content-type') || '';
   let data = null;
@@ -235,6 +244,22 @@ async function refreshAllData(silent = false) {
     if (auditRes.status === 'fulfilled' && Array.isArray(auditRes.value)) {
       STATE.audit = auditRes.value;
     }
+
+    try {
+      const [netInfo, simStatus] = await Promise.all([
+        apiRequest('/network-info').catch(() => null),
+        apiRequest('/demo/status').catch(() => null),
+      ]);
+      if (netInfo && netInfo.is_share_lan) {
+        document.getElementById('share-lan-banner')?.classList.remove('hidden');
+      }
+      if (simStatus) {
+        const lbl = document.getElementById('sim-status-label');
+        if (lbl) {
+          lbl.textContent = simStatus.simulator_running ? `Sim: Step ${simStatus.step}` : 'Sim: Paused';
+        }
+      }
+    } catch (_) {}
     if (devicesRes && devicesRes.status === 'fulfilled' && Array.isArray(devicesRes.value)) {
       STATE.devices = devicesRes.value;
       const devBadge = document.getElementById('nav-badge-devices');
@@ -473,7 +498,7 @@ function renderDeliveriesTable() {
 
       return `
         <tr>
-          <td class="mono"><strong>${escapeHtml(d.delivery_id)}</strong></td>
+          <td class="mono"><strong>${escapeHtml(d.delivery_id)}</strong>${d.is_demo ? ' <span class="badge" style="background:#8b5cf6; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; font-weight:700;">DEMO</span>' : ''}</td>
           <td>${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)}</td>
           <td class="mono">${escapeHtml(d.scheduled_time)}</td>
           <td>${priorityBadgeHtml(d.priority)}</td>
@@ -759,7 +784,7 @@ function renderFleetTable() {
         : `<span class="kpi-sub">—</span>`;
       return `
         <tr>
-          <td class="mono"><strong>${escapeHtml(v.vehicle_id)}</strong></td>
+          <td class="mono"><strong>${escapeHtml(v.vehicle_id)}</strong>${v.is_demo ? ' <span class="badge" style="background:#8b5cf6; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; font-weight:700;">DEMO</span>' : ''}</td>
           <td class="mono">${escapeHtml(v.registration_no)}</td>
           <td>${escapeHtml(v.type)}</td>
           <td class="mono">${escapeHtml(v.capacity)}</td>
@@ -814,7 +839,7 @@ function renderDriversTable() {
         : `<span class="kpi-sub">—</span>`;
       return `
         <tr>
-          <td class="mono"><strong>${escapeHtml(d.driver_id)}</strong></td>
+          <td class="mono"><strong>${escapeHtml(d.driver_id)}</strong>${d.is_demo ? ' <span class="badge" style="background:#8b5cf6; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; font-weight:700;">DEMO</span>' : ''}</td>
           <td>${escapeHtml(d.name)}</td>
           <td class="mono">
             <div>
@@ -3010,6 +3035,60 @@ function setupEventListeners() {
   document.getElementById('btn-refresh-audit')?.addEventListener('click', () => refreshAllData());
   document.getElementById('btn-quick-dispatch')?.addEventListener('click', () => switchView('dispatch'));
   document.getElementById('btn-cmd-palette')?.addEventListener('click', openCommandPalette);
+
+  // Operator name persistence
+  const opInput = document.getElementById('operator-name-input');
+  if (opInput) {
+    opInput.value = localStorage.getItem('fleetwise_operator_name') || '';
+    opInput.addEventListener('input', (e) => {
+      localStorage.setItem('fleetwise_operator_name', e.target.value.trim());
+    });
+  }
+
+  // Demo controls
+  document.getElementById('btn-load-demo')?.addEventListener('click', async () => {
+    try {
+      let coords = null;
+      if (navigator.geolocation) {
+        try {
+          const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 3000 }));
+          coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        } catch (_) {}
+      }
+      const res = await apiRequest('/demo/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(coords ? { center_lat: coords.lat, center_lon: coords.lon } : {}),
+      });
+      alert(`Demo data loaded: ${res.vehicles_loaded} vehicles, ${res.drivers_loaded} drivers, ${res.deliveries_loaded} deliveries.`);
+      await refreshAllData();
+    } catch (err) {
+      alert(`Failed to load demo data: ${err.message}`);
+    }
+  });
+
+  document.getElementById('btn-clear-demo')?.addEventListener('click', async () => {
+    if (!confirm('Clear all demo data? Real vehicles and drivers will be preserved.')) return;
+    try {
+      const res = await apiRequest('/demo/clear', { method: 'POST' });
+      alert(`Demo data cleared: ${res.vehicles_deleted} vehicles, ${res.drivers_deleted} drivers, ${res.deliveries_deleted} deliveries removed.`);
+      await refreshAllData();
+    } catch (err) {
+      alert(`Failed to clear demo data: ${err.message}`);
+    }
+  });
+
+  document.getElementById('btn-sim-toggle')?.addEventListener('click', async () => {
+    try {
+      const res = await apiRequest('/demo/simulator/toggle', { method: 'POST' });
+      const lbl = document.getElementById('sim-status-label');
+      if (lbl) {
+        lbl.textContent = res.simulator_running ? `Sim: Step ${res.step}` : 'Sim: Paused';
+      }
+    } catch (err) {
+      alert(`Simulator toggle failed: ${err.message}`);
+    }
+  });
 
   // Polling toggle
   document.getElementById('btn-toggle-poll')?.addEventListener('click', () => {
