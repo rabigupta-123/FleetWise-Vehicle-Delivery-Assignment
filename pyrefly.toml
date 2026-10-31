@@ -1,3 +1,5 @@
 # Pyrefly Configuration for FleetWise
 search-path = ["."]
 python-version = "3.12"
+project-includes = ["app/**", "tests/**", "scripts/**"]
+project-excludes = [".agents/**", ".venv/**", "venv/**"]

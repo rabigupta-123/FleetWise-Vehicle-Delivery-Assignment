@@ -43,7 +43,7 @@ jobs:
         run: ruff check app tests
 
       - name: Static Type Verification (Pyrefly)
-        run: pyrefly check
+        run: pyrefly check app tests
 
       - name: Math & KaTeX Formatting Check
         run: python scripts/check_math_syntax.py

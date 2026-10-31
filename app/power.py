@@ -15,54 +15,57 @@ def get_server_host_power_status() -> dict[str, Any]:
     if sys.platform == "win32":
         try:
             import ctypes
-            from ctypes import wintypes
+            windll = getattr(ctypes, "windll", None)
+            wintypes = getattr(ctypes, "wintypes", None)
+            if windll is not None and wintypes is not None:
+                class SYSTEM_POWER_STATUS(ctypes.Structure):
+                    _fields_ = [
+                        ("ACLineStatus", wintypes.BYTE),
+                        ("BatteryFlag", wintypes.BYTE),
+                        ("BatteryLifePercent", wintypes.BYTE),
+                        ("SystemStatusFlag", wintypes.BYTE),
+                        ("BatteryLifeTime", wintypes.DWORD),
+                        ("BatteryFullLifeTime", wintypes.DWORD),
+                    ]
 
-            class SYSTEM_POWER_STATUS(ctypes.Structure):
-                _fields_ = [
-                    ("ACLineStatus", wintypes.BYTE),
-                    ("BatteryFlag", wintypes.BYTE),
-                    ("BatteryLifePercent", wintypes.BYTE),
-                    ("SystemStatusFlag", wintypes.BYTE),
-                    ("BatteryLifeTime", wintypes.DWORD),
-                    ("BatteryFullLifeTime", wintypes.DWORD),
-                ]
+                sps = SYSTEM_POWER_STATUS()
+                kernel32 = getattr(windll, "kernel32", None)
+                if kernel32 and hasattr(kernel32, "GetSystemPowerStatus"):
+                    success = kernel32.GetSystemPowerStatus(ctypes.byref(sps))
+                    if success:
+                        ac = sps.ACLineStatus
+                        pct = sps.BatteryLifePercent
+                        rem_sec = sps.BatteryLifeTime
 
-            sps = SYSTEM_POWER_STATUS()
-            success = ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(sps))
-            if success:
-                ac = sps.ACLineStatus
-                pct = sps.BatteryLifePercent
-                rem_sec = sps.BatteryLifeTime
+                        if pct != 255 and pct <= 100:
+                            is_charging = (ac == 1)
+                            charging_text = "⚡ Charging (AC/USB)" if is_charging else "🔋 Discharging (Battery)"
+                            
+                            if not is_charging:
+                                if rem_sec != 4294967295 and rem_sec > 0:
+                                    mins = round(rem_sec / 60)
+                                    discharging_time = f"{mins} min ({round(mins / 60, 1)} hrs)"
+                                else:
+                                    discharging_time = "Estimating discharge rate..."
+                                charging_time = "0 min (Unplugged)"
+                            else:
+                                discharging_time = "Operating on AC Power"
+                                charging_time = "Charging to 100%" if pct < 100 else "Fully Charged (AC Connected)"
 
-                if pct != 255 and pct <= 100:
-                    is_charging = (ac == 1)
-                    charging_text = "⚡ Charging (AC/USB)" if is_charging else "🔋 Discharging (Battery)"
-                    
-                    if not is_charging:
-                        if rem_sec != 4294967295 and rem_sec > 0:
-                            mins = round(rem_sec / 60)
-                            discharging_time = f"{mins} min ({round(mins / 60, 1)} hrs)"
-                        else:
-                            discharging_time = "Estimating discharge rate..."
-                        charging_time = "0 min (Unplugged)"
-                    else:
-                        discharging_time = "Operating on AC Power"
-                        charging_time = "Charging to 100%" if pct < 100 else "Fully Charged (AC Connected)"
-
-                    return {
-                        "supported": True,
-                        "pct": f"{pct}%",
-                        "percentage_num": pct,
-                        "charging": charging_text,
-                        "is_charging": is_charging,
-                        "chargingTime": charging_time,
-                        "dischargingTime": discharging_time,
-                        "battery_flag": sps.BatteryFlag,
-                        "source": "Windows OS Kernel (GetSystemPowerStatus)",
-                        "role": "server_host_power",
-                        "label": "Server host power (Physical machine running backend)",
-                        "reading_timestamp": now_str,
-                    }
+                            return {
+                                "supported": True,
+                                "pct": f"{pct}%",
+                                "percentage_num": pct,
+                                "charging": charging_text,
+                                "is_charging": is_charging,
+                                "chargingTime": charging_time,
+                                "dischargingTime": discharging_time,
+                                "battery_flag": sps.BatteryFlag,
+                                "source": "Windows OS Kernel (GetSystemPowerStatus)",
+                                "role": "server_host_power",
+                                "label": "Server host power (Physical machine running backend)",
+                                "reading_timestamp": now_str,
+                            }
         except Exception:
             pass
 
