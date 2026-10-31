@@ -26,7 +26,7 @@ Thank you for contributing to the FleetWise Conflict-Free Fleet & Delivery Assig
    ruff check app tests
 
    # 3. Run Pyrefly Static Type Checker
-   pyrefly check --min-severity=warn
+   pyrefly check
 
    # 4. Run KaTeX Math Syntax Validation
    python scripts/check_math_syntax.py
@@ -46,3 +46,4 @@ Thank you for contributing to the FleetWise Conflict-Free Fleet & Delivery Assig
 - **Truthfulness Contract**: Never introduce fallback defaults, hardcoded mock analytics, or fabricated telemetry. If an input or measurement is unavailable, record `null` with explicit status and reason.
 - **Transaction Safety**: All state-mutating endpoints must operate inside atomic SQLite `BEGIN IMMEDIATE` transactions.
 - **Documentation**: If you modify API endpoints or mathematical heuristics, update `docs/FORMULAS.md` and synchronize `README.md` via `python scripts/update_readme.py`.
+

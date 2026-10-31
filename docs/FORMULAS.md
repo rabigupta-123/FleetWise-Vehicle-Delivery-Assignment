@@ -148,3 +148,4 @@ In all aggregate analytics and operational formulas:
 $$\text{If denominator } = 0 \implies \text{return } \text{null} \ (\text{"Not available"})$$
 
 No fallback percentages, fake averages, or synthetic defaults are ever emitted when sample count is zero.
+

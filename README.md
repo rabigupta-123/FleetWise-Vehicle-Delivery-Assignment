@@ -237,7 +237,7 @@ python scripts/check_secrets.py
 ruff check app tests
 
 # 3. Run Pyrefly Static Type Checker
-pyrefly check --min-severity=warn
+pyrefly check
 
 # 4. Run KaTeX Math Syntax Validation
 python scripts/check_math_syntax.py

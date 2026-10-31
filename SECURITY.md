@@ -26,3 +26,4 @@ If you discover a security vulnerability or confidentiality issue within FleetWi
 - **Zero-Allocation Leaks**: Database connections serialized with `BEGIN IMMEDIATE` transactions under SQLite WAL mode.
 - **CSRF & Injection Defenses**: Formula prefix escaping on CSV exports/imports (`=`, `+`, `-`, `@`), constant-time OTP comparison via `secrets.compare_digest`.
 - **Truthfulness Contract**: Zero fabricated GPS, battery, or device measurements. Hard constraint rejection ($0.0$) on invalid states.
+
