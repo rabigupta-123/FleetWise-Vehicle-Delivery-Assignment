@@ -29,33 +29,47 @@ def load_demo_data(center_lat: float = DEMO_CENTER_LAT, center_lon: float = DEMO
     """
     Idempotently loads a realistic 12-vehicle, 15-driver, 25-delivery demo dataset.
     All records flagged with is_demo = 1.
+    If demo data already exists, returns 200 with status='already_loaded' and counts without changes.
     Executes in a single atomic database transaction.
     """
     now = datetime.now(UTC)
     now_iso = now.isoformat()
 
-    # Clear existing demo data first to ensure idempotency
-    clear_demo_data()
+    with immediate_transaction() as conn:
+        # Check idempotency: if demo data is already loaded, return existing counts immediately
+        demo_v = conn.execute("SELECT COUNT(*) FROM vehicles WHERE is_demo = 1").fetchone()[0]
+        demo_dr = conn.execute("SELECT COUNT(*) FROM drivers WHERE is_demo = 1").fetchone()[0]
+        demo_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE is_demo = 1").fetchone()[0]
+        if demo_v > 0 or demo_dr > 0 or demo_del > 0:
+            return {
+                "status": "already_loaded",
+                "counts": {
+                    "vehicles": demo_v,
+                    "drivers": demo_dr,
+                    "deliveries": demo_del,
+                },
+                "center": {"latitude": center_lat, "longitude": center_lon},
+            }
 
-    # 12 Vehicles across 4 classes
-    demo_vehicles = [
-        # 3 Bikes
-        ("V-DEMO-B01", "KA-01-DM-1001", "bike", 30, "available"),
-        ("V-DEMO-B02", "KA-01-DM-1002", "bike", 40, "available"),
-        ("V-DEMO-B03", "KA-01-DM-1003", "bike", 50, "maintenance"),
-        # 4 Vans
-        ("V-DEMO-V01", "KA-02-DM-2001", "van", 900, "available"),
-        ("V-DEMO-V02", "KA-02-DM-2002", "van", 1100, "available"),
-        ("V-DEMO-V03", "KA-02-DM-2003", "van", 1250, "assigned"),
-        ("V-DEMO-V04", "KA-02-DM-2004", "van", 1400, "available"),
-        # 3 Mini-trucks
-        ("V-DEMO-M01", "KA-03-DM-3001", "mini-truck", 2200, "available"),
-        ("V-DEMO-M02", "KA-03-DM-3002", "mini-truck", 2800, "assigned"),
-        ("V-DEMO-M03", "KA-03-DM-3003", "mini-truck", 3200, "available"),
-        # 2 Heavy Trucks
-        ("V-DEMO-T01", "KA-04-DM-4001", "truck", 8500, "available"),
-        ("V-DEMO-T02", "KA-04-DM-4002", "truck", 12000, "maintenance"),
-    ]
+        # 12 Vehicles across 4 classes
+        demo_vehicles = [
+            # 3 Bikes
+            ("V-DEMO-B01", "KA-01-DM-1001", "bike", 30, "available"),
+            ("V-DEMO-B02", "KA-01-DM-1002", "bike", 40, "available"),
+            ("V-DEMO-B03", "KA-01-DM-1003", "bike", 50, "maintenance"),
+            # 4 Vans
+            ("V-DEMO-V01", "KA-02-DM-2001", "van", 900, "available"),
+            ("V-DEMO-V02", "KA-02-DM-2002", "van", 1100, "available"),
+            ("V-DEMO-V03", "KA-02-DM-2003", "van", 1250, "assigned"),
+            ("V-DEMO-V04", "KA-02-DM-2004", "van", 1400, "available"),
+            # 3 Mini-trucks
+            ("V-DEMO-M01", "KA-03-DM-3001", "mini-truck", 2200, "available"),
+            ("V-DEMO-M02", "KA-03-DM-3002", "mini-truck", 2800, "assigned"),
+            ("V-DEMO-M03", "KA-03-DM-3003", "mini-truck", 3200, "available"),
+            # 2 Heavy Trucks
+            ("V-DEMO-T01", "KA-04-DM-4001", "truck", 8500, "available"),
+            ("V-DEMO-T02", "KA-04-DM-4002", "truck", 12000, "maintenance"),
+        ]
 
     # 15 Drivers with synthetic names and fake numbers
     demo_drivers = [
@@ -200,7 +214,8 @@ def load_demo_data(center_lat: float = DEMO_CENTER_LAT, center_lon: float = DEMO
 
 def clear_demo_data() -> dict:
     """
-    Halts the demo simulator and atomically removes ONLY rows flagged with is_demo = 1.
+    Halts the demo simulator and atomically removes ONLY rows flagged with is_demo = 1
+    along with child telematics/assignments referencing demo records.
     All real production records, devices, and audit history remain strictly intact.
     """
     global _SIMULATOR_RUNNING
@@ -208,28 +223,60 @@ def clear_demo_data() -> dict:
         _SIMULATOR_RUNNING = False
 
     with immediate_transaction() as conn:
-        # Delete simulated GPS locations
-        conn.execute("DELETE FROM gps_locations WHERE source = 'simulated'")
-
-        # Delete demo tracking sessions
-        conn.execute("DELETE FROM tracking_sessions WHERE is_demo = 1")
-
-        # Delete demo assignments
+        # 1. Delete telematics referencing demo entities
         conn.execute(
-            "DELETE FROM assignments WHERE delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)"
+            """
+            DELETE FROM gps_locations
+            WHERE source = 'simulated'
+               OR delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
+               OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
+               OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
+               OR session_id IN (SELECT session_id FROM tracking_sessions WHERE is_demo = 1)
+            """
         )
 
-        # Delete demo deliveries
+        # 2. Delete tracking sessions referencing demo entities
+        conn.execute(
+            """
+            DELETE FROM tracking_sessions
+            WHERE is_demo = 1
+               OR delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
+               OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
+               OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
+            """
+        )
+
+        # 3. Delete assignments referencing demo entities
+        conn.execute(
+            """
+            DELETE FROM assignments
+            WHERE delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
+               OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
+               OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
+            """
+        )
+
+        # 4. Clean up any device/token references to demo drivers
+        conn.execute("DELETE FROM phone_pairing_tokens WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
+        conn.execute("DELETE FROM devices WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        if "phone_verifications" in tables:
+            conn.execute("DELETE FROM phone_verifications WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
+
+        # 5. Delete demo deliveries, drivers, and vehicles
         del_count = conn.execute("DELETE FROM deliveries WHERE is_demo = 1").rowcount
-
-        # Delete demo drivers
         drv_count = conn.execute("DELETE FROM drivers WHERE is_demo = 1").rowcount
-
-        # Delete demo vehicles
         veh_count = conn.execute("DELETE FROM vehicles WHERE is_demo = 1").rowcount
 
-        # Record demo clearing in append-only audit log
-        write_audit(conn, actor="demo_loader", action="clear_demo", entity="demo_system", entity_id="all", after={"vehicles": veh_count, "drivers": drv_count, "deliveries": del_count})
+        # 6. Record demo clearing in append-only audit log
+        write_audit(
+            conn,
+            actor="demo_loader",
+            action="clear_demo",
+            entity="demo_system",
+            entity_id="all",
+            after={"vehicles": veh_count, "drivers": drv_count, "deliveries": del_count},
+        )
 
     return {
         "status": "cleared",

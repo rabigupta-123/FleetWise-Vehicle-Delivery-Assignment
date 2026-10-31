@@ -49,10 +49,10 @@ def test_audit_1_clean_start_and_health(client: TestClient, temp_db: str):
     res = client.get("/health")
     assert res.status_code == 200
     body = res.json()
-    assert body["status"] == "ok"
-    assert body["journal_mode"].lower() == "wal"
-    assert body["foreign_keys"] is True
-    assert body["counts"] == {"vehicles": 0, "drivers": 0, "deliveries": 0}
+    assert body == {"status": "ok"}
+    assert "counts" not in body
+    assert "journal_mode" not in body
+    assert "foreign_keys" not in body
 
     ui_res = client.get("/")
     assert ui_res.status_code == 200
@@ -62,8 +62,8 @@ def test_audit_1_clean_start_and_health(client: TestClient, temp_db: str):
         test_id="AUDIT-1",
         name="Clean Start & Health",
         test_input={"endpoint": "/health"},
-        expected={"status": "ok", "journal_mode": "wal", "foreign_keys": True, "counts": {"vehicles": 0, "drivers": 0, "deliveries": 0}},
-        observed={"status": body["status"], "journal_mode": body["journal_mode"], "foreign_keys": body["foreign_keys"], "counts": body["counts"]},
+        expected={"status": "ok"},
+        observed=body,
         passed=True,
         evidence_path="evidence/audit_1_clean_start.json",
     )

@@ -225,7 +225,7 @@ python scripts/run_dual_server.py
 ## 🧪 Test Suite & Quality Status
 
 <!-- BEGIN:TEST_COUNTS -->
-**78 Passed** / **78 Total** (100% pass rate)
+**79 Passed** / **79 Total** (100% pass rate)
 <!-- END:TEST_COUNTS -->
 
 ### Running the Complete Test & Quality Suite:
@@ -326,7 +326,7 @@ The following routes are generated directly from the running FastAPI application
 | `PATCH` | `/drivers/{driver_id}/status` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/events` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/export/{entity}.csv` | Yes | `ops_lead` | Operational endpoint |
-| `GET` | `/health` | No | `Public` | Health check verifying database connectivity, WAL mode, foreign keys, and entity counts. |
+| `GET` | `/health` | No | `Public` | Minimal operational health check returning only status. |
 | `GET` | `/import/templates/{entity}.csv` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `POST` | `/import/{entity}` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/metrics` | Yes | `ops_lead` | Operational endpoint |

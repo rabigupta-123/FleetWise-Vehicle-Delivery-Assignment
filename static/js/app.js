@@ -168,15 +168,15 @@ function showToast(message, isError = false, code = null) {
   }, 4500);
 }
 
-function showGlobalError(code, message) {
+function showGlobalError(code, message, reqId = '') {
   const banner = document.getElementById('global-error-banner');
   const codeEl = document.getElementById('global-error-code');
   const msgEl = document.getElementById('global-error-message');
   if (!banner || !codeEl || !msgEl) return;
   codeEl.textContent = code || 'ERROR';
-  msgEl.textContent = message || 'An unexpected error occurred.';
+  msgEl.textContent = reqId ? `${message} [Req ID: ${reqId}]` : (message || 'An unexpected error occurred.');
   banner.classList.remove('hidden');
-  showToast(message, true, code);
+  showToast(msgEl.textContent, true, code);
 }
 
 function clearGlobalError() {
@@ -205,9 +205,12 @@ async function apiRequest(path, options = {}) {
   if (!res.ok) {
     const errCode = (data && data.error) || `HTTP_${res.status}`;
     const errMsg = (data && data.message) || (typeof data === 'string' && data) || 'Request failed';
-    const err = new Error(errMsg);
+    const reqId = (data && data.request_id) || res.headers.get('x-request-id') || '';
+    const err = new Error(reqId ? `${errMsg} [Req ID: ${reqId}]` : errMsg);
     err.status = res.status;
     err.code = errCode;
+    err.requestId = reqId;
+    err.rawMessage = errMsg;
     err.payload = data;
     throw err;
   }
@@ -3060,7 +3063,12 @@ function setupEventListeners() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(coords ? { center_lat: coords.lat, center_lon: coords.lon } : {}),
       });
-      alert(`Demo data loaded: ${res.vehicles_loaded} vehicles, ${res.drivers_loaded} drivers, ${res.deliveries_loaded} deliveries.`);
+      if (res.status === 'already_loaded') {
+        const counts = res.counts || {};
+        alert(`Demo data is already loaded (${counts.vehicles ?? 0} vehicles, ${counts.drivers ?? 0} drivers, ${counts.deliveries ?? 0} deliveries present).`);
+      } else {
+        alert(`Demo data loaded successfully: ${res.vehicles ?? 12} vehicles, ${res.drivers ?? 15} drivers, ${res.deliveries ?? 25} deliveries.`);
+      }
       await refreshAllData();
     } catch (err) {
       alert(`Failed to load demo data: ${err.message}`);
@@ -3071,7 +3079,8 @@ function setupEventListeners() {
     if (!confirm('Clear all demo data? Real vehicles and drivers will be preserved.')) return;
     try {
       const res = await apiRequest('/demo/clear', { method: 'POST' });
-      alert(`Demo data cleared: ${res.vehicles_deleted} vehicles, ${res.drivers_deleted} drivers, ${res.deliveries_deleted} deliveries removed.`);
+      const del = res.deleted || {};
+      alert(`Demo data cleared: ${del.vehicles ?? 0} vehicles, ${del.drivers ?? 0} drivers, ${del.deliveries ?? 0} deliveries removed.`);
       await refreshAllData();
     } catch (err) {
       alert(`Failed to clear demo data: ${err.message}`);

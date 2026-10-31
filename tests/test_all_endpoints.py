@@ -12,10 +12,10 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     assert r.status_code == 200
     assert "FleetWise" in r.text
 
-    # 2. GET /health -> 200
+    # 2. GET /health -> 200 (minimal body only)
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+    assert r.json() == {"status": "ok"}
 
     # 3. GET /metrics -> 200
     r = client.get("/metrics")

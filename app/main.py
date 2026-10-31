@@ -159,7 +159,9 @@ register_exception_handlers(app)
 # Security Headers & Exception Handling Middleware
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
+    request.state.request_id = f"req_{secrets.token_hex(6)}"
     response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.request_id
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline'; "
@@ -177,8 +179,8 @@ async def security_headers_middleware(request: Request, call_next):
 async def network_access_middleware(request: Request, call_next):
     path = request.url.path
 
-    # Public static assets and health endpoint
-    if path == "/health" or path.startswith("/static"):
+    # Public static assets, health check, and diagnostic probe
+    if path == "/health" or path.startswith("/static") or path == "/probe" or path.startswith("/probe"):
         return await call_next(request)
 
     is_loopback = is_loopback_client(request)
@@ -200,6 +202,10 @@ async def network_access_middleware(request: Request, call_next):
     # Otherwise (remote LAN client without --share): check if path is an authorized phone route
     is_phone_route = path.startswith("/driver") or path.startswith("/probe") or path.startswith("/tracking")
     if is_phone_route:
+        # Public probe diagnostic
+        if path == "/probe" and request.method == "GET":
+            return await call_next(request)
+
         # Extract pairing token from query params or header
         pair_token = request.query_params.get("pair") or request.query_params.get("token")
         if not pair_token:
@@ -384,23 +390,8 @@ def serve_driver_portal(request: Request):
 # -------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
-    """Health check verifying database connectivity, WAL mode, foreign keys, and entity counts."""
-    with read_conn() as conn:
-        journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
-        fk_enabled = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
-        v_count = conn.execute("SELECT COUNT(*) FROM vehicles;").fetchone()[0]
-        dr_count = conn.execute("SELECT COUNT(*) FROM drivers;").fetchone()[0]
-        del_count = conn.execute("SELECT COUNT(*) FROM deliveries;").fetchone()[0]
-    return {
-        "status": "ok",
-        "journal_mode": journal_mode,
-        "foreign_keys": bool(fk_enabled),
-        "counts": {
-            "vehicles": v_count,
-            "drivers": dr_count,
-            "deliveries": del_count,
-        },
-    }
+    """Minimal operational health check returning only status."""
+    return {"status": "ok"}
 
 
 @app.get("/network-info")
@@ -466,8 +457,8 @@ def get_network_info():
 # -------------------------------------------------------------------------
 # DEMO DATA & SIMULATOR ENDPOINTS
 # -------------------------------------------------------------------------
-@app.post("/demo/load", status_code=201)
-async def api_load_demo_data(request: Request):
+@app.post("/demo/load")
+async def api_load_demo_data(request: Request, response: Response):
     """Loads clearly labeled demo dataset (~12 vehicles, ~15 drivers, 25 deliveries) in 1 transaction."""
     from app.config import DEMO_CENTER_LAT, DEMO_CENTER_LON
     from scripts.demo_data import load_demo_data
@@ -478,9 +469,16 @@ async def api_load_demo_data(request: Request):
         if body and "latitude" in body and "longitude" in body:
             center_lat = float(body["latitude"])
             center_lon = float(body["longitude"])
+        elif body and "center_lat" in body and "center_lon" in body:
+            center_lat = float(body["center_lat"])
+            center_lon = float(body["center_lon"])
     except Exception:
         pass
     res = load_demo_data(center_lat=center_lat, center_lon=center_lon)
+    if res.get("status") == "already_loaded":
+        response.status_code = 200
+    else:
+        response.status_code = 201
     broadcast_event("demo_data_loaded", res)
     return res
 

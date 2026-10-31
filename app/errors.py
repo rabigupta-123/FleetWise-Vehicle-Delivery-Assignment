@@ -1,7 +1,13 @@
+import logging
+import secrets
+import traceback
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger("fleetwise")
 
 
 class AppError(Exception):
@@ -63,7 +69,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def unhandled_exception_handler(
         request: Request, exc: Exception
     ) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", None) or f"req_{secrets.token_hex(6)}"
+        tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        logger.error("Unhandled Exception [request_id=%s]: %s\n%s", request_id, exc, tb_str)
+        print(f"[ERROR] Unhandled Exception [{request_id}]: {exc}\n{tb_str}", flush=True)
         return JSONResponse(
             status_code=500,
-            content={"error": "INTERNAL_SERVER_ERROR", "message": "An unexpected server error occurred."},
+            content={
+                "error": "INTERNAL_SERVER_ERROR",
+                "message": str(exc) or "An unexpected server error occurred.",
+                "request_id": request_id,
+            },
         )

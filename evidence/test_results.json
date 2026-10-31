@@ -292,24 +292,10 @@
       "endpoint": "/health"
     },
     "expected": {
-      "status": "ok",
-      "journal_mode": "wal",
-      "foreign_keys": true,
-      "counts": {
-        "vehicles": 0,
-        "drivers": 0,
-        "deliveries": 0
-      }
+      "status": "ok"
     },
     "observed": {
-      "status": "ok",
-      "journal_mode": "wal",
-      "foreign_keys": true,
-      "counts": {
-        "vehicles": 0,
-        "drivers": 0,
-        "deliveries": 0
-      }
+      "status": "ok"
     },
     "status": "PASS",
     "evidence_path": "evidence/audit_1_clean_start.json"
