@@ -1,0 +1,62 @@
+{
+  "title": "FleetWise Concurrency & Latency Benchmark",
+  "timestamp": "2026-10-31T12:08:52Z",
+  "disclaimer": "Measured on a single developer machine with SQLite; real production throughput depends on network and database backend.",
+  "results": [
+    {
+      "threads": 1,
+      "total_requests": 100,
+      "successful_requests": 100,
+      "success_rate_pct": 100.0,
+      "wall_duration_s": 1.9702,
+      "requests_per_second": 50.8,
+      "latency_p50_ms": 18.35,
+      "latency_p95_ms": 31.98,
+      "latency_p99_ms": 85.78
+    },
+    {
+      "threads": 5,
+      "total_requests": 100,
+      "successful_requests": 100,
+      "success_rate_pct": 100.0,
+      "wall_duration_s": 1.9361,
+      "requests_per_second": 51.7,
+      "latency_p50_ms": 118.96,
+      "latency_p95_ms": 204.43,
+      "latency_p99_ms": 290.73
+    },
+    {
+      "threads": 10,
+      "total_requests": 100,
+      "successful_requests": 100,
+      "success_rate_pct": 100.0,
+      "wall_duration_s": 2.0645,
+      "requests_per_second": 48.4,
+      "latency_p50_ms": 257.61,
+      "latency_p95_ms": 425.87,
+      "latency_p99_ms": 449.37
+    },
+    {
+      "threads": 25,
+      "total_requests": 100,
+      "successful_requests": 100,
+      "success_rate_pct": 100.0,
+      "wall_duration_s": 2.3756,
+      "requests_per_second": 42.1,
+      "latency_p50_ms": 599.05,
+      "latency_p95_ms": 1213.4,
+      "latency_p99_ms": 1359.38
+    },
+    {
+      "threads": 50,
+      "total_requests": 100,
+      "successful_requests": 100,
+      "success_rate_pct": 100.0,
+      "wall_duration_s": 15.264,
+      "requests_per_second": 6.6,
+      "latency_p50_ms": 1072.64,
+      "latency_p95_ms": 3065.63,
+      "latency_p99_ms": 15088.46
+    }
+  ]
+}

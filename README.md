@@ -225,7 +225,7 @@ python scripts/run_dual_server.py
 ## 🧪 Test Suite & Quality Status
 
 <!-- BEGIN:TEST_COUNTS -->
-**64 Passed** / **64 Total** (100% pass rate)
+**70 Passed** / **70 Total** (100% pass rate)
 <!-- END:TEST_COUNTS -->
 
 ### Running the Complete Test & Quality Suite:
@@ -251,6 +251,22 @@ pytest -v --junitxml=junit.xml
 # 7. Check Documentation Synchronization
 python scripts/update_readme.py --check
 ```
+
+---
+
+## ⚡ Concurrency & Performance Benchmark
+
+<!-- BEGIN:BENCHMARK -->
+> **Disclaimer:** Measured on a single developer machine with SQLite; real production throughput depends on network and database backend.
+
+| Concurrency (Threads) | Requests | Success Rate | Wall Duration | Throughput (req/s) | p50 Latency | p95 Latency |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **1 Thread(s)** | 100 | 100.0% | 1.9702 s | 50.8 req/s | 18.35 ms | 31.98 ms |
+| **5 Thread(s)** | 100 | 100.0% | 1.9361 s | 51.7 req/s | 118.96 ms | 204.43 ms |
+| **10 Thread(s)** | 100 | 100.0% | 2.0645 s | 48.4 req/s | 257.61 ms | 425.87 ms |
+| **25 Thread(s)** | 100 | 100.0% | 2.3756 s | 42.1 req/s | 599.05 ms | 1213.4 ms |
+| **50 Thread(s)** | 100 | 100.0% | 15.264 s | 6.6 req/s | 1072.64 ms | 3065.63 ms |
+<!-- END:BENCHMARK -->
 
 ---
 
@@ -316,6 +332,7 @@ The following routes are generated directly from the running FastAPI application
 | `POST` | `/tracking/location` | Operational endpoint |
 | `POST` | `/tracking/sessions/start` | Operational endpoint |
 | `POST` | `/tracking/sessions/stop` | Operational endpoint |
+| `POST` | `/tracking/sessions/{session_id}/consent` | Explicitly grants or revokes driver location tracking consent. |
 | `GET` | `/tracking/telemetry-graph` | Operational endpoint |
 | `GET` | `/tracking/vehicles/{vehicle_id}/latest` | Operational endpoint |
 | `GET` | `/vehicles` | Operational endpoint |

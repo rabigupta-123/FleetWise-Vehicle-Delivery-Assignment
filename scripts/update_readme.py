@@ -3,6 +3,7 @@ Updates marked dynamic sections in README.md from the running application:
 - API Routes Reference from app.main.app.routes
 - Test Counts from pytest junitxml / test suite
 """
+import json
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -79,6 +80,29 @@ def get_test_counts_markdown() -> str:
     return f"**{total} Passed** / **{total} Total** (100% pass rate)"
 
 
+def generate_benchmark_table() -> str:
+    bench_path = WORKSPACE / "evidence" / "benchmark.json"
+    if not bench_path.exists():
+        return ""
+    try:
+        data = json.loads(bench_path.read_text(encoding="utf-8"))
+        disclaimer = data.get("disclaimer", "")
+        lines = [
+            f"> **Disclaimer:** {disclaimer}\n",
+            "| Concurrency (Threads) | Requests | Success Rate | Wall Duration | Throughput (req/s) | p50 Latency | p95 Latency |",
+            "|:---:|:---:|:---:|:---:|:---:|:---:|:---:|",
+        ]
+        for r in data.get("results", []):
+            lines.append(
+                f"| **{r['threads']} Thread(s)** | {r['total_requests']} | {r['success_rate_pct']}% | "
+                f"{r['wall_duration_s']} s | {r['requests_per_second']} req/s | "
+                f"{r['latency_p50_ms']} ms | {r['latency_p95_ms']} ms |"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def update_readme(check_only: bool = False) -> bool:
     readme_path = WORKSPACE / "README.md"
     content = readme_path.read_text(encoding="utf-8")
@@ -99,6 +123,14 @@ def update_readme(check_only: bool = False) -> bool:
         pattern = r"<!-- BEGIN:TEST_COUNTS -->[\s\S]*?<!-- END:TEST_COUNTS -->"
         replacement = f"<!-- BEGIN:TEST_COUNTS -->\n{test_counts}\n<!-- END:TEST_COUNTS -->"
         new_content = re.sub(pattern, replacement, new_content)
+
+    # Replace Benchmark table
+    if "<!-- BEGIN:BENCHMARK -->" in content and "<!-- END:BENCHMARK -->" in content:
+        bench_table = generate_benchmark_table()
+        if bench_table:
+            pattern = r"<!-- BEGIN:BENCHMARK -->[\s\S]*?<!-- END:BENCHMARK -->"
+            replacement = f"<!-- BEGIN:BENCHMARK -->\n{bench_table}\n<!-- END:BENCHMARK -->"
+            new_content = re.sub(pattern, replacement, new_content)
 
     if check_only:
         norm_new = new_content.replace("\r\n", "\n").strip()
