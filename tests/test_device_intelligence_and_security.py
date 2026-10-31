@@ -449,13 +449,32 @@ def test_battery_truthfulness_unit_states_node():
 
 
 def test_system_host_power_endpoint(client: TestClient):
-    """Verifies that /system/host-power returns server host physical telemetry with explicit role isolation."""
+    """Verifies that /system/host-power returns server host physical telemetry with explicit role isolation, and old routes are 404."""
     res = client.get("/system/host-power")
     assert res.status_code == 200
     data = res.json()
     assert "supported" in data
     assert data["role"] == "server_host_power"
     assert "Server host power" in data["label"]
+
+    # Strict route removal: old endpoints MUST return 404
+    assert client.get("/api/system/power-status").status_code == 404
+    assert client.get("/system/power-status").status_code == 404
+
+
+def test_linux_and_missing_hardware_power_fallback(monkeypatch):
+    """Verifies that on non-Windows or when ctypes.windll is missing, status is 'unavailable' with a truthful reason."""
+    import sys
+    from app.power import get_server_host_power_status
+
+    # Simulate non-Windows Linux platform with no psutil battery
+    monkeypatch.setattr(sys, "platform", "linux")
+    res = get_server_host_power_status()
+    assert res["supported"] is False
+    assert res["status"] == "unavailable"
+    assert "No battery sensor detected" in res["reason"]
+    assert res["percentage_num"] is None
+    assert res["role"] == "server_host_power"
 
 
 def test_probe_endpoints_and_recording(client: TestClient, temp_db: str):

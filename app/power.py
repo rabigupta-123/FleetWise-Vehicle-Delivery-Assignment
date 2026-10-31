@@ -54,6 +54,7 @@ def get_server_host_power_status() -> dict[str, Any]:
 
                             return {
                                 "supported": True,
+                                "status": "measured",
                                 "pct": f"{pct}%",
                                 "percentage_num": pct,
                                 "charging": charging_text,
@@ -86,6 +87,7 @@ def get_server_host_power_status() -> dict[str, Any]:
 
                 return {
                     "supported": True,
+                    "status": "measured",
                     "pct": f"{pct}%",
                     "percentage_num": pct,
                     "charging": charging_text,
@@ -102,13 +104,15 @@ def get_server_host_power_status() -> dict[str, Any]:
 
     return {
         "supported": False,
+        "status": "unavailable",
+        "reason": "No battery sensor detected on server (Desktop / VM / Linux without battery hardware)",
         "pct": "Unavailable",
         "percentage_num": None,
         "charging": "Unknown",
         "is_charging": False,
         "chargingTime": "Unavailable",
         "dischargingTime": "Unavailable",
-        "source": "No battery sensor detected on server (Desktop / VM)",
+        "source": "No battery sensor detected on server (Desktop / VM / Linux without battery)",
         "role": "server_host_power",
         "label": "Server host power (Physical machine running backend)",
         "reading_timestamp": now_str,
