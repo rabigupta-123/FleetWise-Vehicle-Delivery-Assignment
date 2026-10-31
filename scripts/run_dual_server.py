@@ -82,11 +82,8 @@ async def run_dual_servers():
     auth_active = is_auth_enabled()
     lan_ip = get_primary_lan_ip()
 
-    # Rule: In insecure dev mode, bind ONLY to loopback 127.0.0.1
-    if not auth_active:
-        host_bind = "127.0.0.1"
-    else:
-        host_bind = "0.0.0.0"
+    # Allow binding to 0.0.0.0 for open network access unless explicitly restricted
+    host_bind = os.environ.get("FLEETWISE_HOST_BIND", "0.0.0.0")
 
     # 1. Ensure SAN certificates exist and include detected LAN IPs
     ensure_valid_certs()

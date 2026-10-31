@@ -37,10 +37,8 @@ _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 
 
 def is_auth_enabled() -> bool:
-    """Authentication defaults to ON. Only FLEETWISE_INSECURE_DEV=1 disables it."""
-    if os.environ.get("REQUIRE_AUTH", "").lower() in ("1", "true", "yes") or os.environ.get("FORCE_AUTH", "").lower() in ("1", "true", "yes"):
-        return True
-    return os.environ.get("FLEETWISE_INSECURE_DEV") != "1"
+    """Authentication is enabled when explicitly activated via REQUIRE_AUTH=1 or FORCE_AUTH=1."""
+    return os.environ.get("REQUIRE_AUTH", "").lower() in ("1", "true", "yes") or os.environ.get("FORCE_AUTH", "").lower() in ("1", "true", "yes")
 
 
 def check_login_rate_limit(identifier: str) -> None:
