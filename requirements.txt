@@ -1,6 +1,6 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
-pydantic>=2.6.0
+pydantic>=2.14.1
 python-dotenv>=1.0.1
 python-multipart>=0.0.9
 phonenumbers>=8.13.0
