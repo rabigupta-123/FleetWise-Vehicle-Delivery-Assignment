@@ -179,3 +179,115 @@ def test_gps_coordinate_boundaries_and_empty_states(client: TestClient, temp_db:
     # Nonexistent vehicle returns 404
     assert client.get("/tracking/vehicles/V-9999/latest").status_code == 404
 
+
+def test_driver_gps_consent_requirement_and_revocation(client: TestClient, temp_db: str):
+    """
+    Verifies that driver explicit consent is mandatory before coordinates can be ingested.
+    Rejects coordinates with 403 when consent is missing or revoked.
+    """
+    client.post("/drivers", json={"driver_id": "DR-CONSENT-01", "name": "Consent Driver", "phone": "+91-9876543299"})
+
+    # 1. Start tracking session WITHOUT consent
+    res_start = client.post("/tracking/sessions/start", json={
+        "driver_id": "DR-CONSENT-01",
+        "consent_given": False,
+    })
+    assert res_start.status_code == 201
+    sess_data = res_start.json()
+    assert sess_data["consent_given"] is False
+    assert sess_data["consent_timestamp"] is None
+    sess_id = sess_data["session_id"]
+
+    # 2. Coordinate stream must be rejected with 403 CONSENT_REQUIRED
+    res_fix_blocked = client.post("/tracking/location", json={
+        "session_id": sess_id,
+        "latitude": 12.9716,
+        "longitude": 77.5946,
+        "accuracy": 5.0,
+        "device_timestamp": "2026-10-31T10:00:00Z",
+    })
+    assert res_fix_blocked.status_code == 403
+    assert res_fix_blocked.json()["error"] == "CONSENT_REQUIRED"
+
+    # 3. Explicitly grant driver consent via endpoint
+    res_consent = client.post(f"/tracking/sessions/{sess_id}/consent", json={"consent_given": True})
+    assert res_consent.status_code == 200
+    assert res_consent.json()["consent_given"] is True
+    assert res_consent.json()["consent_timestamp"] is not None
+
+    # 4. Ingesting location fix now succeeds with 201
+    res_fix_ok = client.post("/tracking/location", json={
+        "session_id": sess_id,
+        "latitude": 12.9716,
+        "longitude": 77.5946,
+        "accuracy": 5.0,
+        "device_timestamp": "2026-10-31T10:00:00Z",
+    })
+    assert res_fix_ok.status_code == 201
+
+    # 5. Revoking consent blocks future location fixes
+    client.post(f"/tracking/sessions/{sess_id}/consent", json={"consent_given": False})
+    res_fix_revoked = client.post("/tracking/location", json={
+        "session_id": sess_id,
+        "latitude": 12.9720,
+        "longitude": 77.5950,
+        "accuracy": 5.0,
+        "device_timestamp": "2026-10-31T10:00:02Z",
+    })
+    assert res_fix_revoked.status_code == 403
+    assert res_fix_revoked.json()["error"] == "CONSENT_REQUIRED"
+
+
+def test_gps_telemetry_retention_purge(temp_db: str, monkeypatch):
+    """
+    Verifies that the configurable GPS retention policy correctly purges
+    historical fixes older than the retention cutoff (default 30 days).
+    """
+    import sqlite3
+    from datetime import datetime, UTC, timedelta
+    from app.db import purge_old_gps_telemetry
+
+    conn = sqlite3.connect(temp_db)
+    # Insert session
+    conn.execute(
+        "INSERT INTO drivers (driver_id, name, phone) VALUES ('DR-RET-01', 'Ret Driver', '+919999900000')"
+    )
+    conn.execute(
+        "INSERT INTO tracking_sessions (session_id, driver_id, started_at, status) VALUES ('TRK-RET-01', 'DR-RET-01', '2026-09-01T00:00:00Z', 'active')"
+    )
+
+    # Insert old fix (45 days ago) and recent fix (5 days ago)
+    old_ts = (datetime.now(UTC) - timedelta(days=45)).isoformat()
+    recent_ts = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+
+    conn.execute(
+        """
+        INSERT INTO gps_locations (location_id, session_id, driver_id, latitude, longitude, accuracy, device_timestamp, server_timestamp)
+        VALUES ('LOC-OLD', 'TRK-RET-01', 'DR-RET-01', 12.9, 77.5, 10.0, ?, ?)
+        """,
+        (old_ts, old_ts),
+    )
+    conn.execute(
+        """
+        INSERT INTO gps_locations (location_id, session_id, driver_id, latitude, longitude, accuracy, device_timestamp, server_timestamp)
+        VALUES ('LOC-RECENT', 'TRK-RET-01', 'DR-RET-01', 12.91, 77.51, 10.0, ?, ?)
+        """,
+        (recent_ts, recent_ts),
+    )
+    conn.commit()
+
+    # Verify both fixes exist
+    count_before = conn.execute("SELECT COUNT(*) FROM gps_locations").fetchone()[0]
+    assert count_before == 2
+
+    # Run purge with 30-day retention
+    purged = purge_old_gps_telemetry(conn, retention_days=30)
+    conn.commit()
+
+    assert purged == 1
+    remaining = conn.execute("SELECT location_id FROM gps_locations").fetchall()
+    assert len(remaining) == 1
+    assert remaining[0][0] == "LOC-RECENT"
+    conn.close()
+
+

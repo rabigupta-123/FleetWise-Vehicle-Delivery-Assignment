@@ -161,6 +161,11 @@ class TrackingSessionStart(BaseModel):
     driver_id: str = Field(..., min_length=1, max_length=50)
     device_id: str | None = Field(default=None, max_length=50)
     device_info: str | None = Field(default=None, max_length=255)
+    consent_given: bool = Field(default=True, description="Explicit driver consent for real-time location streaming")
+
+
+class TrackingConsentUpdate(BaseModel):
+    consent_given: bool = Field(..., description="Whether driver has granted explicit location tracking consent")
 
 
 class TrackingSessionStop(BaseModel):

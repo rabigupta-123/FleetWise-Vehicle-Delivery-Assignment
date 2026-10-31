@@ -46,10 +46,12 @@ from app.auth import (
     set_session_cookie,
     verify_password,
 )
+from app.config import get_gps_retention_days
 from app.db import (
     get_connection,
     immediate_transaction,
     init_db,
+    purge_old_gps_telemetry,
     read_conn,
     utc_now_iso,
     write_audit,
@@ -75,6 +77,7 @@ from app.schemas import (
     DriverStatusPatch,
     GPSLocationCreate,
     PhoneVerifyCodeRequest,
+    TrackingConsentUpdate,
     TrackingSessionStart,
     TrackingSessionStop,
     VehicleCreate,
@@ -106,8 +109,10 @@ def broadcast_event(event_type: str, data: Any):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # Seed default users if users table is empty
+    retention_days = get_gps_retention_days()
+    # Seed default users and purge expired GPS fixes on startup
     with immediate_transaction() as conn:
+        purge_old_gps_telemetry(conn, retention_days)
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if count == 0:
             for uname, udata in DEFAULT_USERS.items():
@@ -2336,12 +2341,17 @@ def start_tracking_session(body: TrackingSessionStart, request: Request):
 
         session_id = f"TRK-{uuid.uuid4().hex[:10].upper()}"
         dev_info = body.device_info or "Mobile Browser Geolocation"
+        consent_int = 1 if body.consent_given else 0
+        consent_ts = now_str if body.consent_given else None
         conn.execute(
             """
-            INSERT INTO tracking_sessions (session_id, driver_id, device_id, vehicle_id, delivery_id, device_info, started_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+            INSERT INTO tracking_sessions (
+                session_id, driver_id, device_id, vehicle_id, delivery_id,
+                device_info, started_at, status, consent_given, consent_timestamp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
             """,
-            (session_id, body.driver_id, body.device_id, vehicle_id, delivery_id, dev_info, now_str),
+            (session_id, body.driver_id, body.device_id, vehicle_id, delivery_id, dev_info, now_str, consent_int, consent_ts),
         )
 
         session_data = {
@@ -2355,11 +2365,41 @@ def start_tracking_session(body: TrackingSessionStart, request: Request):
             "device_info": dev_info,
             "started_at": now_str,
             "status": "active",
+            "consent_given": bool(body.consent_given),
+            "consent_timestamp": consent_ts,
         }
         write_audit(conn, actor=actor, action="start_tracking", entity="tracking_session", entity_id=session_id, after=session_data)
 
     broadcast_event("tracking_session_started", session_data)
     return session_data
+
+
+@app.post("/tracking/sessions/{session_id}/consent")
+def update_tracking_session_consent(session_id: str, body: TrackingConsentUpdate, request: Request):
+    """Explicitly grants or revokes driver location tracking consent."""
+    user = get_current_user(request)
+    check_permission(user, "drivers", request=request)
+    actor = user["username"] if user else "operator"
+
+    with immediate_transaction() as conn:
+        row = conn.execute("SELECT * FROM tracking_sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if not row:
+            raise AppError(404, "NOT_FOUND", f"Tracking session '{session_id}' not found.")
+        now_str = utc_now_iso()
+        consent_int = 1 if body.consent_given else 0
+        consent_ts = now_str if body.consent_given else None
+        conn.execute(
+            "UPDATE tracking_sessions SET consent_given = ?, consent_timestamp = ? WHERE session_id = ?",
+            (consent_int, consent_ts, session_id),
+        )
+        data = {
+            "session_id": session_id,
+            "consent_given": body.consent_given,
+            "consent_timestamp": consent_ts,
+            "message": "Consent recorded successfully." if body.consent_given else "Consent revoked.",
+        }
+        write_audit(conn, actor=actor, action="update_tracking_consent", entity="tracking_session", entity_id=session_id, after=data)
+        return data
 
 
 @app.post("/tracking/sessions/stop")
@@ -2411,6 +2451,10 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
 
         if session["status"] != "active":
             raise AppError(400, "SESSION_INACTIVE", f"Tracking session '{body.session_id}' is currently '{session['status']}'.")
+
+        # Driver explicit GPS tracking consent verification
+        if not session.get("consent_given"):
+            raise AppError(403, "CONSENT_REQUIRED", "Driver GPS consent is required before streaming location coordinates.")
 
         # Anti-flooding rate limit (minimum 0.8s between fixes per session)
         last_fix = conn.execute(
