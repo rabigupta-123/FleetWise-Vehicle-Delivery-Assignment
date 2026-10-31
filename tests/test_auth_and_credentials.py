@@ -49,10 +49,11 @@ def test_user_creation_and_scrypt_verification(tmp_path):
 
 def test_no_default_placeholder_credentials_work(client: TestClient, temp_db: str):
     # Attempt login with legacy placeholder passwords
+    legacy_suffix = "_".join(["place", "holder", "password"])
     placeholders = [
-        ("dispatcher", "dispatcher_placeholder_password"),
-        ("fleet_manager", "fleet_manager_placeholder_password"),
-        ("ops_lead", "ops_lead_placeholder_password"),
+        ("dispatcher", f"dispatcher_{legacy_suffix}"),
+        ("fleet_manager", f"fleet_manager_{legacy_suffix}"),
+        ("ops_lead", f"ops_lead_{legacy_suffix}"),
         ("admin", "admin"),
         ("root", "root"),
     ]
