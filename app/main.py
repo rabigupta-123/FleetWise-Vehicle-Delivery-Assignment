@@ -144,6 +144,23 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def require_auth_middleware(request: Request, call_next):
+    require_auth = os.environ.get("REQUIRE_AUTH", "").lower() in ("1", "true", "yes") or os.environ.get("FORCE_AUTH", "").lower() in ("1", "true", "yes")
+    if require_auth:
+        path = request.url.path
+        public_exact = {"/", "/health", "/auth/login", "/probe", "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
+        is_public = path in public_exact or path.startswith("/static")
+        if not is_public:
+            user = get_current_user(request)
+            if user is None:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "UNAUTHORIZED", "message": "Authentication required. Please log in."},
+                )
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 

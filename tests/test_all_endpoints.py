@@ -401,3 +401,78 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     assert r.status_code == 200
     assert "data_points" in r.json()
     assert "points" in r.json()
+
+
+def test_auth_enforcement_on_all_routes_when_require_auth_active(client: TestClient, monkeypatch):
+    """
+    Enumerates every route registered in app.routes.
+    When REQUIRE_AUTH=1, asserts that all non-allowlisted routes return 401 without credentials.
+    Allowlist: {/, /health, /auth/login, /probe, /static/*, /openapi.json, /docs, /redoc, /docs/oauth2-redirect}
+    """
+    import re
+    from app.main import app
+
+    monkeypatch.setenv("REQUIRE_AUTH", "1")
+    public_allowlist = {
+        "/",
+        "/health",
+        "/auth/login",
+        "/probe",
+        "/openapi.json",
+        "/docs",
+        "/redoc",
+        "/docs/oauth2-redirect",
+    }
+
+    tested_routes = 0
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if not path or not methods:
+            continue
+
+        # Skip documentation and Swagger UI routes
+        if path in public_allowlist or path.startswith("/static"):
+            continue
+
+        # Substitute path parameters (e.g., {delivery_id} -> test_id)
+        test_path = re.sub(r"\{[^}]+\}", "test_id", path)
+
+        # Pick one supported method to probe
+        method = "GET" if "GET" in methods else ("POST" if "POST" in methods else list(methods)[0])
+
+        if method == "GET":
+            res = client.get(test_path)
+        elif method == "POST":
+            res = client.post(test_path, json={})
+        elif method == "PATCH":
+            res = client.patch(test_path, json={})
+        else:
+            continue
+
+        tested_routes += 1
+        assert res.status_code == 401, f"Route {method} {path} returned {res.status_code} instead of 401"
+        assert res.json()["error"] == "UNAUTHORIZED"
+
+    assert tested_routes >= 35, f"Expected at least 35 protected routes tested, got {tested_routes}"
+
+
+def test_route_order_dispatch_next_and_blocked(client: TestClient, temp_db: str):
+    """
+    Verifies that FastAPI routes /deliveries/dispatch-next and /deliveries/blocked
+    are evaluated before parameterized /deliveries/{delivery_id} routes and never treated as ID lookups.
+    """
+    # 1. /deliveries/dispatch-next returns 200 or 404 (no deliveries to dispatch), not a single delivery lookup
+    res_dn = client.get("/deliveries/dispatch-next")
+    assert res_dn.status_code in (200, 404)
+    if res_dn.status_code == 200:
+        data = res_dn.json()
+        assert "delivery" in data or "delivery_id" in data
+
+    # 2. /deliveries/blocked returns 200 payload with blocked_deliveries list
+    res_blk = client.get("/deliveries/blocked")
+    assert res_blk.status_code == 200
+    data_blk = res_blk.json()
+    assert "blocked_deliveries" in data_blk
+    assert isinstance(data_blk["blocked_deliveries"], list)
+
