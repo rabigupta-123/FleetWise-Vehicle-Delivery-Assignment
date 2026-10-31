@@ -8,27 +8,51 @@ on:
 
 jobs:
   test:
-    name: Run Test Suite
-    runs-on: ubuntu-latest
+    name: Test & Lint (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12"]
 
     steps:
-      - name: Check out code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
-      - name: Install dependencies
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run Pytest Suite (50 Tests)
-        run: |
-          pytest -v
+      - name: Security & Secrets Check
+        run: python scripts/check_secrets.py
 
+      - name: Code Quality & Linting (Ruff)
+        run: ruff check app tests
+
+      - name: Static Type Verification (Pyrefly)
+        run: pyrefly check --min-severity=warn
+
+      - name: Math & KaTeX Formatting Check
+        run: python scripts/check_math_syntax.py
+
+      - name: Node.js Unit Tests (Battery States)
+        run: node --test tests/test_battery_states.test.js
+
+      - name: Pytest Integration & Physics Suite
+        run: pytest -v --junitxml=junit.xml
+
+      - name: Documentation Drift Verification
+        run: python scripts/update_readme.py --check

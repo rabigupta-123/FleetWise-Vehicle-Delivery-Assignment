@@ -28,4 +28,8 @@ certs/*.pem
 certs/*.key
 certs/*.crt
 
+# Linters and Test Reports
+.ruff_cache/
+junit.xml
+
 
