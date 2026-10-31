@@ -1,9 +1,11 @@
 import json
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any, Iterator, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+from app.clock import utc_now_iso
 from app.config import get_db_path
 
 SCHEMA_SQL = """
@@ -100,6 +102,35 @@ CREATE TABLE IF NOT EXISTS audit_log (
     after_json TEXT NULL
 );
 
+-- Phase 1.8: Enforce append-only integrity on audit_log with SQLite triggers
+CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_update
+BEFORE UPDATE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log is append-only: UPDATE is forbidden');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_delete
+BEFORE DELETE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log is append-only: DELETE is forbidden');
+END;
+
+CREATE TABLE IF NOT EXISTS device_probe_reports (
+    report_id TEXT PRIMARY KEY,
+    device_id TEXT NULL,
+    driver_id TEXT NULL,
+    token_used TEXT NULL,
+    client_ip TEXT NOT NULL,
+    user_agent TEXT NOT NULL,
+    is_secure_context INTEGER NOT NULL,
+    high_entropy_ch_json TEXT NULL,
+    client_probe_json TEXT NOT NULL,
+    server_probe_json TEXT NOT NULL,
+    discrepancies_json TEXT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_probe_reports_created ON device_probe_reports(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS idempotency_keys (
     key TEXT PRIMARY KEY,
     request_hash TEXT NOT NULL,
@@ -171,11 +202,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_assignments_active_delivery
 """
 
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
+def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     path = db_path or get_db_path()
     conn = sqlite3.connect(path, timeout=30.0, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -185,7 +212,7 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     return conn
 
 
-def init_db(db_path: Optional[str] = None) -> None:
+def init_db(db_path: str | None = None) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(SCHEMA_SQL)
@@ -234,10 +261,31 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
     add_col_if_missing("gps_locations", "is_implausible_jump", "INTEGER NOT NULL DEFAULT 0")
     add_col_if_missing("gps_locations", "quality_flag", "TEXT NOT NULL DEFAULT 'accepted'")
     add_col_if_missing("gps_locations", "client_ip", "TEXT NULL")
+    add_col_if_missing("gps_locations", "raw_payload_json", "TEXT NULL")
+    add_col_if_missing("gps_locations", "clock_skew_seconds", "REAL NULL")
+    add_col_if_missing("gps_locations", "is_late_delivered", "INTEGER NOT NULL DEFAULT 0")
+
+    # Tracking Sessions tokens and consent
+    add_col_if_missing("tracking_sessions", "tracking_token", "TEXT NULL")
+    add_col_if_missing("tracking_sessions", "token_expires_at", "TEXT NULL")
+    add_col_if_missing("tracking_sessions", "token_revoked", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("tracking_sessions", "consent_given", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("tracking_sessions", "consent_timestamp", "TEXT NULL")
+    add_col_if_missing("tracking_sessions", "single_device_token", "TEXT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tracking_sessions_token ON tracking_sessions(tracking_token);")
+
+
+def purge_old_gps_telemetry(conn: sqlite3.Connection, retention_days: int) -> int:
+    """Auto-purges raw GPS telemetry older than retention_days."""
+    if retention_days <= 0:
+        return 0
+    cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
+    cur = conn.execute("DELETE FROM gps_locations WHERE server_timestamp < ?", (cutoff,))
+    return cur.rowcount
 
 
 @contextmanager
-def read_conn(db_path: Optional[str] = None) -> Iterator[sqlite3.Connection]:
+def read_conn(db_path: str | None = None) -> Generator[sqlite3.Connection, None, None]:
     conn = get_connection(db_path)
     try:
         yield conn
@@ -246,7 +294,7 @@ def read_conn(db_path: Optional[str] = None) -> Iterator[sqlite3.Connection]:
 
 
 @contextmanager
-def immediate_transaction(db_path: Optional[str] = None) -> Iterator[sqlite3.Connection]:
+def immediate_transaction(db_path: str | None = None) -> Generator[sqlite3.Connection, None, None]:
     """
     Open a connection and start an explicit BEGIN IMMEDIATE transaction.
     Commits on clean exit; rolls back on any exception so zero partial updates occur.
@@ -273,8 +321,8 @@ def write_audit(
     action: str,
     entity: str,
     entity_id: str,
-    before: Optional[Any] = None,
-    after: Optional[Any] = None,
+    before: Any | None = None,
+    after: Any | None = None,
 ) -> None:
     conn.execute(
         """
@@ -293,7 +341,7 @@ def write_audit(
     )
 
 
-def row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict[str, Any]]:
+def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(row)

@@ -2,13 +2,12 @@ import csv
 import io
 import json
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
 import sqlite3
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from app.db import row_to_dict, utc_now_iso, write_audit
+from app.db import utc_now_iso
 from app.errors import AppError
-
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 MAX_ROWS = 5000
@@ -53,7 +52,7 @@ def parse_upload_content(filename: str, content_bytes: bytes) -> list[dict[str, 
     try:
         text = content_bytes.decode("utf-8-sig")
     except UnicodeDecodeError:
-        raise AppError(400, "VALIDATION_ERROR", "File encoding must be UTF-8 or UTF-8 with BOM.")
+        raise AppError(400, "VALIDATION_ERROR", "File encoding must be UTF-8 or UTF-8 with BOM.") from None
 
     text = text.strip()
     if not text:
@@ -74,7 +73,7 @@ def parse_upload_content(filename: str, content_bytes: bytes) -> list[dict[str, 
         except AppError:
             raise
         except Exception as e:
-            raise AppError(400, "VALIDATION_ERROR", f"Invalid JSON format: {str(e)}")
+            raise AppError(400, "VALIDATION_ERROR", f"Invalid JSON format: {str(e)}") from e
     else:
         # CSV parsing with CRLF and quoted-comma handling
         try:
@@ -92,7 +91,7 @@ def parse_upload_content(filename: str, content_bytes: bytes) -> list[dict[str, 
         except AppError:
             raise
         except Exception as e:
-            raise AppError(400, "VALIDATION_ERROR", f"Invalid CSV format: {str(e)}")
+            raise AppError(400, "VALIDATION_ERROR", f"Invalid CSV format: {str(e)}") from e
 
 
 def validate_iso8601(val: str) -> bool:
@@ -318,7 +317,7 @@ def validate_deliveries_rows(rows: list[dict[str, Any]], conn: sqlite3.Connectio
         sched_time = str(r.get("scheduled_time") or "").strip()
         if not sched_time:
             # Automatic graceful fallback to 4 hours ahead in UTC ISO-8601
-            sched_time = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+            sched_time = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
         priority = str(r.get("priority") or "normal").strip().lower()
         if priority == "medium":
             priority = "normal"

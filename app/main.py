@@ -10,30 +10,24 @@ import secrets
 import tempfile
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
-from fastapi import Depends, FastAPI, File, Header, Query, Request, Response, UploadFile
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI, File, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
 
 from app.advisor import get_dispatch_next_delivery, get_recommendations_for_delivery
 from app.analytics.accuracy_engine import (
-    calculate_data_completeness,
-    calculate_freshness_score,
-    calculate_gps_quality_score,
-    calculate_movement_consistency,
     calculate_telemetry_quality_score,
 )
 from app.analytics.confidence_engine import (
     evaluate_assignment_confidence,
     evaluate_device_identity_confidence,
-    evaluate_location_confidence,
 )
 from app.analytics.deep_analysis import (
     analyze_delivery_performance,
@@ -57,7 +51,6 @@ from app.db import (
     immediate_transaction,
     init_db,
     read_conn,
-    row_to_dict,
     utc_now_iso,
     write_audit,
 )
@@ -81,7 +74,6 @@ from app.schemas import (
     DriverPhonePatch,
     DriverStatusPatch,
     GPSLocationCreate,
-    PhoneVerificationRequest,
     PhoneVerifyCodeRequest,
     TrackingSessionStart,
     TrackingSessionStop,
@@ -92,7 +84,6 @@ from app.telematics import (
     compute_freshness_status,
     evaluate_telemetry_step,
     evaluate_timestamp_validity,
-    haversine_distance_meters,
     normalize_phone_number,
 )
 
@@ -161,6 +152,77 @@ def serve_index():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/probe", include_in_schema=False)
+def serve_probe():
+    return FileResponse(str(STATIC_DIR / "probe.html"))
+
+
+@app.post("/probe/report")
+async def record_probe_report(request: Request):
+    """Stores client device capability and battery diagnostics probe report."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise AppError(400, "VALIDATION_ERROR", "Invalid JSON payload.") from None
+
+    report_id = f"prb_{secrets.token_hex(8)}"
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    is_secure = int(request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https")
+    now_iso = datetime.now(UTC).isoformat()
+
+    device_id = body.get("device_id")
+    driver_id = body.get("driver_id")
+    token_used = body.get("token")
+    high_entropy = json.dumps(body.get("high_entropy_ch", {}))
+    client_probe = json.dumps(body)
+    server_probe = json.dumps({
+        "received_at": now_iso,
+        "client_ip": client_ip,
+        "headers": dict(request.headers),
+    })
+    discrepancies = json.dumps(body.get("discrepancies", []))
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO device_probe_reports (
+                report_id, device_id, driver_id, token_used,
+                client_ip, user_agent, is_secure_context,
+                high_entropy_ch_json, client_probe_json,
+                server_probe_json, discrepancies_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                report_id, device_id, driver_id, token_used,
+                client_ip, user_agent, is_secure,
+                high_entropy, client_probe,
+                server_probe, discrepancies, now_iso
+            )
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"status": "ok", "report_id": report_id, "received_at": now_iso}
+
+
+@app.get("/devices/probe-reports")
+def list_probe_reports(limit: int = 50):
+    """Retrieves list of captured device probe reports."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT report_id, device_id, driver_id, client_ip, user_agent, is_secure_context, created_at "
+            "FROM device_probe_reports ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 # -------------------------------------------------------------------------
 # AUTHENTICATION & RBAC (B5)
 # -------------------------------------------------------------------------
@@ -169,7 +231,7 @@ async def login(request: Request, response: Response):
     try:
         body = await request.json()
     except Exception:
-        raise AppError(400, "VALIDATION_ERROR", "Invalid JSON payload.")
+        raise AppError(400, "VALIDATION_ERROR", "Invalid JSON payload.") from None
     username = str(body.get("username") or "").strip()
     password = str(body.get("password") or "").strip()
     if not username or not password:
@@ -262,7 +324,7 @@ def get_network_info():
             usable = ["127.0.0.1"]
 
     has_ssl = os.path.exists("certs/cert.pem") and os.path.exists("certs/key.pem")
-    cert_info = {}
+    cert_info: dict[str, Any] = {}
     if has_ssl:
         try:
             from scripts.generate_ssl_certs import TRUST_INSTRUCTIONS, inspect_cert
@@ -286,10 +348,11 @@ def get_network_info():
     }
 
 
-@app.get("/api/system/power-status")
-def get_system_power_status():
-    from app.power import get_hardware_power_status
-    return get_hardware_power_status()
+@app.get("/system/host-power")
+def get_system_host_power():
+    """Returns server host physical power telemetry (Win32 kernel GetSystemPowerStatus / psutil)."""
+    from app.power import get_server_host_power_status
+    return get_server_host_power_status()
 
 
 @app.get("/metrics")
@@ -373,7 +436,7 @@ async def sse_events(request: Request, single_ping: bool = False):
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=20.0)
                     yield f"event: state_change\ndata: {payload}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield "event: ping\ndata: keep-alive\n\n"
         finally:
             SSE_SUBSCRIBERS.discard(queue)
@@ -671,7 +734,7 @@ def request_driver_phone_verification(driver_id: str, request: Request):
         code_hash = hashlib.sha256((code + driver_id).encode()).hexdigest()
         verification_id = f"VRF-{uuid.uuid4().hex[:10].upper()}"
         now_str = utc_now_iso()
-        exp_str = (datetime.now(timezone.utc) + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        exp_str = (datetime.now(UTC) + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         conn.execute(
             """
@@ -695,6 +758,8 @@ def request_driver_phone_verification(driver_id: str, request: Request):
             "status": "pending",
             "expires_at": exp_str,
             "mode": "development",
+            "is_dev_mode": True,
+            "disclaimer": "DEV MODE - no SMS is sent",
             "dev_verification_code": code,
             "dev_challenge_code": code,
             "message": f"Verification challenge created for {phone_e164}. Enter the 6-digit code to complete verification.",
@@ -733,7 +798,7 @@ def verify_driver_phone(driver_id: str, body: PhoneVerifyCodeRequest, request: R
 
         try:
             exp_time = datetime.fromisoformat(vrf["expires_at"].replace("Z", "+00:00"))
-            if datetime.now(timezone.utc) > exp_time:
+            if datetime.now(UTC) > exp_time:
                 conn.execute("UPDATE phone_verifications SET status = 'expired' WHERE verification_id = ?", (body.verification_id,))
                 raise AppError(400, "CHALLENGE_EXPIRED", "Verification code has expired. Please request a new code.")
         except ValueError:
@@ -779,7 +844,7 @@ def enrich_delivery_sla(d: dict[str, Any]) -> dict[str, Any]:
     try:
         norm = sched_str[:-1] + "+00:00" if sched_str.endswith("Z") else sched_str
         target = datetime.fromisoformat(norm)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         diff_sec = int((target - now).total_seconds())
 
         if d.get("status") in ("delivered", "cancelled"):
@@ -808,7 +873,7 @@ def enrich_delivery_sla(d: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/deliveries")
-def list_deliveries(status: Optional[str] = Query(None), q: Optional[str] = Query(None)):
+def list_deliveries(status: str | None = Query(None), q: str | None = Query(None)):
     query = """
         SELECT d.delivery_id, d.pickup, d.dropoff, d.scheduled_time, d.priority,
                d.required_capacity, d.status, d.created_at, d.version,
@@ -961,10 +1026,9 @@ def get_blocked_queue():
 
 
 @app.post("/deliveries/auto-assign")
-def auto_assign_all(dry_run: bool = Query(True), request: Request = None):
+def auto_assign_all(request: Request, dry_run: bool = Query(True)):
     user = get_current_user(request)
     check_permission(user, "assign", request=request)
-    actor = user["username"] if user else "operator"
 
     with read_conn() as conn:
         delivs = conn.execute(
@@ -1052,7 +1116,7 @@ def auto_assign_all(dry_run: bool = Query(True), request: Request = None):
 def assign_delivery(
     delivery_id: str,
     body: AssignRequest,
-    request: Request = None,
+    request: Request,
 ):
     """
     Atomically assign a vehicle and driver to a pending delivery.
@@ -1066,7 +1130,7 @@ def assign_delivery(
     idempotency_key = request.headers.get("Idempotency-Key") if request else None
     if_match = request.headers.get("If-Match") if request else None
 
-    payload_hash = hashlib.sha256(f"ASSIGN:{delivery_id}:{body.vehicle_id}:{body.driver_id}".encode("utf-8")).hexdigest()
+    payload_hash = hashlib.sha256(f"ASSIGN:{delivery_id}:{body.vehicle_id}:{body.driver_id}".encode()).hexdigest()
 
     # 0. Check Idempotency-Key
     if idempotency_key:
@@ -1165,10 +1229,10 @@ def assign_delivery(
             )
 
         if not veh_available:
-            raise AppError(409, "VEHICLE_UNAVAILABLE", veh_reason)
+            raise AppError(409, "VEHICLE_UNAVAILABLE", veh_reason or "Vehicle unavailable.")
 
         if not drv_available:
-            raise AppError(409, "DRIVER_UNAVAILABLE", drv_reason)
+            raise AppError(409, "DRIVER_UNAVAILABLE", drv_reason or "Driver unavailable.")
 
         # 6. Check Capacity
         req_cap = delivery.get("required_capacity")
@@ -1247,7 +1311,7 @@ ALLOWED_TRANSITIONS = {
 def patch_delivery_status(
     delivery_id: str,
     body: DeliveryStatusPatch,
-    request: Request = None,
+    request: Request,
 ):
     user = get_current_user(request) if request else None
     check_permission(user, "status", request=request)
@@ -1257,7 +1321,7 @@ def patch_delivery_status(
     if_match = request.headers.get("If-Match") if request else None
 
     target_status = body.status.strip().lower()
-    payload_hash = hashlib.sha256(f"STATUS:{delivery_id}:{target_status}".encode("utf-8")).hexdigest()
+    payload_hash = hashlib.sha256(f"STATUS:{delivery_id}:{target_status}".encode()).hexdigest()
 
     if idempotency_key:
         with read_conn() as conn:
@@ -1405,7 +1469,12 @@ def download_template(entity: str):
 
 
 @app.post("/import/{entity}")
-async def import_entity(entity: str, dry_run: bool = Query(True), file: UploadFile = File(...), request: Request = None):
+async def import_entity(
+    entity: str,
+    request: Request,
+    file: UploadFile = File(...),
+    dry_run: bool = Query(True),
+):
     user = get_current_user(request) if request else None
     check_permission(user, "import", request=request)
     actor = user["username"] if user else "operator"
@@ -1544,6 +1613,9 @@ def run_concurrency_race_lab(workers: int = Query(20, ge=2, le=100)):
                 conn.execute("BEGIN IMMEDIATE")
                 # Re-validate
                 deliv = conn.execute("SELECT status FROM deliveries WHERE delivery_id = ?", (del_id,)).fetchone()
+                if not deliv or deliv["status"] != "pending":
+                    conn.execute("ROLLBACK")
+                    return {"delivery_id": del_id, "status_code": 409, "error": "DELIVERY_NOT_PENDING", "duration_ms": round((time.perf_counter() - w_start) * 1000, 2)}
                 veh_asg = conn.execute("SELECT assignment_id FROM assignments WHERE vehicle_id = 'V-RACE' AND released_at IS NULL").fetchone()
                 drv_asg = conn.execute("SELECT assignment_id FROM assignments WHERE driver_id = 'DR-RACE' AND released_at IS NULL").fetchone()
 
@@ -1782,7 +1854,8 @@ def get_confidence_analytics():
         pending_dels = conn.execute("SELECT * FROM deliveries WHERE status = 'pending' LIMIT 5").fetchall()
         assignment_evals = []
         for d in pending_dels:
-            recs = get_recommendations_for_delivery(conn, d["delivery_id"], top_k=1)
+            rec_result = get_recommendations_for_delivery(d["delivery_id"], conn)
+            recs = rec_result.get("recommendations", [])
             if recs:
                 top = recs[0]
                 conf = evaluate_assignment_confidence(
@@ -2028,13 +2101,13 @@ def register_device(body: DeviceRegisterRequest, request: Request):
 
 @app.get("/devices")
 def list_devices(
-    driver_id: Optional[str] = Query(None),
-    is_revoked: Optional[bool] = Query(None),
+    driver_id: str | None = Query(None),
+    is_revoked: bool | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ):
     with read_conn() as conn:
         conditions = []
-        params = []
+        params: list[Any] = []
         if driver_id:
             conditions.append("d.driver_id = ?")
             params.append(driver_id)
@@ -2126,7 +2199,7 @@ def rename_device(device_id: str, body: DeviceRenameRequest, request: Request):
 
 
 @app.post("/devices/{device_id}/revoke")
-def revoke_device(device_id: str, request: Request, body: Optional[DeviceRevokeRequest] = None):
+def revoke_device(device_id: str, request: Request, body: DeviceRevokeRequest | None = None):
     user = get_current_user(request)
     check_permission(user, "drivers", request=request)
     actor = user["username"] if user else "operator"
@@ -2151,7 +2224,8 @@ def revoke_device(device_id: str, request: Request, body: Optional[DeviceRevokeR
             (now_str, device_id),
         )
 
-        after_dev = {**dev, "is_revoked": True, "revoked_at": now_str, "revoke_reason": body.reason}
+        revoke_reason = body.reason if body else "Administrative revocation"
+        after_dev = {**dev, "is_revoked": True, "revoked_at": now_str, "revoke_reason": revoke_reason}
         write_audit(conn, actor=actor, action="revoke_device", entity="device", entity_id=device_id, before=dev, after=after_dev)
 
     broadcast_event("device_revoked", after_dev)
@@ -2182,7 +2256,7 @@ def get_device_telemetry(device_id: str, limit: int = Query(100, ge=1, le=500)):
 # -------------------------------------------------------------------------
 # REAL PHONE GPS TRACKING, VEHICLE & DELIVERY TELEMETRY & STREET VIEW
 # -------------------------------------------------------------------------
-def make_street_view_url(lat: Optional[float], lng: Optional[float]) -> Optional[str]:
+def make_street_view_url(lat: float | None, lng: float | None) -> str | None:
     if lat is None or lng is None:
         return None
     return f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat:.6f},{lng:.6f}"
@@ -2282,9 +2356,6 @@ def stop_tracking_session(body: TrackingSessionStop, request: Request):
 
 @app.post("/tracking/location", status_code=201)
 def record_gps_location(body: GPSLocationCreate, request: Request):
-    user = get_current_user(request)
-    actor = user["username"] if user else "device"
-
     with immediate_transaction() as conn:
         sess_row = conn.execute("SELECT * FROM tracking_sessions WHERE session_id = ?", (body.session_id,)).fetchone()
         if not sess_row:
@@ -2323,7 +2394,7 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         ).fetchone()
 
         now_str = utc_now_iso()
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         ts_validity = evaluate_timestamp_validity(body.device_timestamp, now_str)
 
         if last_fix:
@@ -2382,6 +2453,9 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
                 "is_implausible_jump": 0,
                 "quality_flag": quality,
             }
+
+        if ts_validity.get("status") == "clock_skew_high" and kin.get("quality_flag") == "accepted":
+            kin["quality_flag"] = "clock_skew"
 
         client_ip = request.client.host if request.client else "127.0.0.1"
         loc_id = f"LOC-{uuid.uuid4().hex[:10].upper()}"
@@ -2629,7 +2703,7 @@ def get_delivery_latest_location(delivery_id: str):
                 (asg["driver_id"],),
             ).fetchone()
 
-        resp = {
+        resp: dict[str, Any] = {
             "delivery": d_dict,
             "assignment": dict(asg) if asg else None,
             "pickup_street_view": make_street_view_url(d_dict.get("pickup_lat"), d_dict.get("pickup_lng")),
@@ -2659,11 +2733,11 @@ def get_delivery_latest_location(delivery_id: str):
 
 @app.get("/tracking/history")
 def get_tracking_history(
-    session_id: Optional[str] = Query(None),
-    driver_id: Optional[str] = Query(None),
-    vehicle_id: Optional[str] = Query(None),
-    delivery_id: Optional[str] = Query(None),
-    since: Optional[str] = Query(None),
+    session_id: str | None = Query(None),
+    driver_id: str | None = Query(None),
+    vehicle_id: str | None = Query(None),
+    delivery_id: str | None = Query(None),
+    since: str | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
 ):
     with read_conn() as conn:
@@ -2695,8 +2769,8 @@ def get_tracking_history(
             ORDER BY server_timestamp ASC
             LIMIT ?
         """
-        params.append(limit)
-        rows = conn.execute(query, tuple(params)).fetchall()
+        params_with_limit: list[Any] = list(params) + [limit]
+        rows = conn.execute(query, tuple(params_with_limit)).fetchall()
         trail = [dict(r) for r in rows]
         for pt in trail:
             pt["street_view_url"] = make_street_view_url(pt["latitude"], pt["longitude"])
@@ -2708,10 +2782,10 @@ def get_tracking_history(
 
 @app.get("/tracking/telemetry-graph")
 def get_telemetry_graph(
-    driver_id: Optional[str] = Query(None),
-    vehicle_id: Optional[str] = Query(None),
-    delivery_id: Optional[str] = Query(None),
-    session_id: Optional[str] = Query(None),
+    driver_id: str | None = Query(None),
+    vehicle_id: str | None = Query(None),
+    delivery_id: str | None = Query(None),
+    session_id: str | None = Query(None),
     limit: int = Query(100, ge=5, le=500),
 ):
     import math
@@ -2740,8 +2814,8 @@ def get_telemetry_graph(
             ORDER BY server_timestamp ASC
             LIMIT ?
         """
-        params.append(limit)
-        rows = conn.execute(query, tuple(params)).fetchall()
+        params_with_limit: list[Any] = list(params) + [limit]
+        rows = conn.execute(query, tuple(params_with_limit)).fetchall()
 
     def haversine(lat1, lon1, lat2, lon2):
         R = 6371.0

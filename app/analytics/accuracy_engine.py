@@ -27,8 +27,13 @@ Formulas & Definitions:
    Renormalizes over available components.
 """
 import math
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import UTC, datetime
+from typing import Any
+
+from app.config import (
+    HEURISTIC_GPS_ACCURACY_DECAY_M,
+)
+from app.math_utils import round_half_up
 
 FORMULA_VERSION = "1.0.0"
 EARTH_RADIUS_METERS = 6371000.0
@@ -62,11 +67,11 @@ OPTIONAL_TELEMETRY_FIELDS = [
 
 
 def calculate_gps_quality_score(
-    accuracy_meters: Optional[float],
-    scale_meters: float = 50.0,
-) -> Tuple[Optional[float], List[str]]:
+    accuracy_meters: float | None,
+    scale_meters: float = HEURISTIC_GPS_ACCURACY_DECAY_M,
+) -> tuple[float | None, list[str]]:
     """
-    Computes normalized GPS Quality Score:
+    Computes normalized GPS Quality Score (Heuristic):
     Score = 100 * exp(-accuracy_meters / scale_meters)
     Returns (score, flags). Returns (None, flags) if accuracy missing or invalid.
     """
@@ -84,7 +89,7 @@ def calculate_gps_quality_score(
         return None, flags
 
     if scale_meters <= 0.0:
-        scale_meters = 50.0
+        scale_meters = HEURISTIC_GPS_ACCURACY_DECAY_M
 
     score = 100.0 * math.exp(-accuracy_meters / scale_meters)
     if accuracy_meters > 150.0:
@@ -92,14 +97,14 @@ def calculate_gps_quality_score(
     elif accuracy_meters <= 10.0:
         flags.append("high_precision_fix")
 
-    return round(score, 2), flags
+    return round_half_up(score, 2), flags
 
 
 def calculate_freshness_score(
-    location_timestamp_iso: Optional[str],
-    current_time_iso: Optional[str] = None,
+    location_timestamp_iso: str | None,
+    current_time_iso: str | None = None,
     tau_seconds: float = 120.0,
-) -> Tuple[Optional[float], List[str], Optional[float]]:
+) -> tuple[float | None, list[str], float | None]:
     """
     Computes location freshness decay score:
     age_seconds = current_time - location_timestamp
@@ -116,7 +121,7 @@ def calculate_freshness_score(
         if current_time_iso:
             t_now = datetime.fromisoformat(current_time_iso.replace("Z", "+00:00"))
         else:
-            t_now = datetime.now(timezone.utc)
+            t_now = datetime.now(UTC)
         age_seconds = (t_now - t_loc).total_seconds()
     except Exception:
         flags.append("unparseable_timestamp")
@@ -167,9 +172,9 @@ def calculate_movement_consistency(
     curr_lon: float,
     curr_ts_iso: str,
     vehicle_type: str = "van",
-    reported_speed_mps: Optional[float] = None,
-    reported_accuracy_m: Optional[float] = None,
-) -> Dict[str, Any]:
+    reported_speed_mps: float | None = None,
+    reported_accuracy_m: float | None = None,
+) -> dict[str, Any]:
     """
     Evaluates kinematic consistency between consecutive GPS fixes.
     Returns distance, time delta, speed, consistency score (0-100), and anomaly flags.
@@ -269,7 +274,7 @@ def calculate_movement_consistency(
     }
 
 
-def calculate_data_completeness(record: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_data_completeness(record: dict[str, Any]) -> dict[str, Any]:
     """
     Evaluates telemetry data completeness:
     (present_valid_required_fields / total_required_fields) * 100
@@ -311,12 +316,12 @@ def calculate_data_completeness(record: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def calculate_telemetry_quality_score(
-    record: Dict[str, Any],
-    prev_record: Optional[Dict[str, Any]] = None,
+    record: dict[str, Any],
+    prev_record: dict[str, Any] | None = None,
     vehicle_type: str = "van",
     scale_meters: float = 50.0,
     tau_seconds: float = 120.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Computes overall Telemetry Quality Score using transparent weighted components:
     - 0.40 * GPS Quality
@@ -389,7 +394,7 @@ def calculate_telemetry_quality_score(
         "quality_flags": list(set(flags)),
         "kinematics": kin_data,
         "completeness": comp_data,
-        "calculation_timestamp": datetime.now(timezone.utc).isoformat(),
+        "calculation_timestamp": datetime.now(UTC).isoformat(),
         "formula_version": FORMULA_VERSION,
         "label": "Telemetry Quality Score",
         "description": "Weighted heuristic combining GPS accuracy, freshness decay, kinematic consistency, and completeness.",

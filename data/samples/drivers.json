@@ -1,0 +1,8 @@
+[
+  {"driver_id": "DR-SMPL-01", "name": "Driver Alpha", "phone": "+1-555-0101", "availability_status": "available"},
+  {"driver_id": "DR-SMPL-02", "name": "Driver Bravo", "phone": "+1-555-0102", "availability_status": "available"},
+  {"driver_id": "DR-SMPL-03", "name": "Driver Charlie", "phone": "+1-555-0103", "availability_status": "available"},
+  {"driver_id": "DR-SMPL-04", "name": "Driver Delta", "phone": "+1-555-0104", "availability_status": "unavailable"},
+  {"driver_id": "DR-SMPL-05", "name": "Driver Echo", "phone": "+1-555-0105", "availability_status": "available"}
+]
+

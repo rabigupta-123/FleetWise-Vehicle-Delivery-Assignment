@@ -1,0 +1,63 @@
+[
+  {
+    "delivery_id": "DEL-SMPL-01",
+    "pickup": "Hub Terminal A",
+    "dropoff": "Logistics Depot North",
+    "scheduled_time": "2026-11-01T09:00:00Z",
+    "priority": "urgent",
+    "required_capacity": 450,
+    "pickup_lat": 12.9716,
+    "pickup_lng": 77.5946,
+    "drop_lat": 12.9900,
+    "drop_lng": 77.6100
+  },
+  {
+    "delivery_id": "DEL-SMPL-02",
+    "pickup": "Hub Terminal A",
+    "dropoff": "Retail Plaza Central",
+    "scheduled_time": "2026-11-01T10:30:00Z",
+    "priority": "high",
+    "required_capacity": 800,
+    "pickup_lat": 12.9716,
+    "pickup_lng": 77.5946,
+    "drop_lat": 12.9350,
+    "drop_lng": 77.6200
+  },
+  {
+    "delivery_id": "DEL-SMPL-03",
+    "pickup": "Distribution Center B",
+    "dropoff": "Industrial Park South",
+    "scheduled_time": "2026-11-01T11:00:00Z",
+    "priority": "normal",
+    "required_capacity": 1100,
+    "pickup_lat": 12.9200,
+    "pickup_lng": 77.5800,
+    "drop_lat": 12.8900,
+    "drop_lng": 77.6000
+  },
+  {
+    "delivery_id": "DEL-SMPL-04",
+    "pickup": "Hub Terminal A",
+    "dropoff": "Metro Outpost East",
+    "scheduled_time": "2026-11-01T14:00:00Z",
+    "priority": "low",
+    "required_capacity": 250,
+    "pickup_lat": 12.9716,
+    "pickup_lng": 77.5946,
+    "drop_lat": 12.9600,
+    "drop_lng": 77.6500
+  },
+  {
+    "delivery_id": "DEL-SMPL-05",
+    "pickup": "Crossdock Station C",
+    "dropoff": "Harbor Gate 4",
+    "scheduled_time": "2026-11-01T16:00:00Z",
+    "priority": "high",
+    "required_capacity": 1800,
+    "pickup_lat": 12.9500,
+    "pickup_lng": 77.5500,
+    "drop_lat": 12.9100,
+    "drop_lng": 77.5300
+  }
+]
+

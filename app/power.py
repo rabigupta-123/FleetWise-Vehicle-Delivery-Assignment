@@ -1,13 +1,13 @@
-import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 
-def get_hardware_power_status() -> Dict[str, Any]:
+def get_server_host_power_status() -> dict[str, Any]:
     """
     Queries real physical hardware battery and power supply directly from
-    the operating system kernel, bypassing browser privacy stubs.
+    the SERVER machine operating system kernel.
+    NOTE: This strictly represents the server host, NOT client/driver mobile devices.
     """
     now_str = datetime.now().strftime("%H:%M:%S")
 
@@ -59,6 +59,8 @@ def get_hardware_power_status() -> Dict[str, Any]:
                         "dischargingTime": discharging_time,
                         "battery_flag": sps.BatteryFlag,
                         "source": "Windows OS Kernel (GetSystemPowerStatus)",
+                        "role": "server_host_power",
+                        "label": "Server host power (Physical machine running backend)",
                         "reading_timestamp": now_str,
                     }
         except Exception:
@@ -66,7 +68,8 @@ def get_hardware_power_status() -> Dict[str, Any]:
 
     # 2. Cross-platform fallback via psutil if available
     try:
-        import psutil
+        import importlib
+        psutil = importlib.import_module("psutil")
         if hasattr(psutil, "sensors_battery"):
             bat = psutil.sensors_battery()
             if bat is not None:
@@ -87,6 +90,8 @@ def get_hardware_power_status() -> Dict[str, Any]:
                     "chargingTime": "Fully Charged" if pct == 100 else ("Charging" if is_charging else "0 min"),
                     "dischargingTime": discharging_time,
                     "source": "OS Hardware Sensors (psutil)",
+                    "role": "server_host_power",
+                    "label": "Server host power (Physical machine running backend)",
                     "reading_timestamp": now_str,
                 }
     except Exception:
@@ -100,7 +105,9 @@ def get_hardware_power_status() -> Dict[str, Any]:
         "is_charging": False,
         "chargingTime": "Unavailable",
         "dischargingTime": "Unavailable",
-        "source": "No battery sensor detected (Desktop / VM)",
+        "source": "No battery sensor detected on server (Desktop / VM)",
+        "role": "server_host_power",
+        "label": "Server host power (Physical machine running backend)",
         "reading_timestamp": now_str,
     }
 

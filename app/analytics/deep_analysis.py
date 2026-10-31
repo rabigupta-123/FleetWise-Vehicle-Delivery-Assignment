@@ -4,11 +4,11 @@ Structured, reproducible analytics across fleet operations, delivery performance
 telemetry kinematics, driver metrics, and operational anomaly detection.
 """
 import sqlite3
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any
 
 
-def analyze_fleet_utilization(conn: sqlite3.Connection) -> Dict[str, Any]:
+def analyze_fleet_utilization(conn: sqlite3.Connection) -> dict[str, Any]:
     """
     Calculates fleet utilization excluding inactive / retired vehicles:
     fleet_utilization = (vehicles currently assigned / total active vehicles) * 100
@@ -48,7 +48,7 @@ def analyze_fleet_utilization(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
-def analyze_driver_utilization(conn: sqlite3.Connection) -> Dict[str, Any]:
+def analyze_driver_utilization(conn: sqlite3.Connection) -> dict[str, Any]:
     """
     Calculates driver utilization excluding permanently unavailable drivers:
     driver_utilization = (drivers currently assigned / total eligible active drivers) * 100
@@ -85,7 +85,7 @@ def analyze_driver_utilization(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
-def analyze_delivery_performance(conn: sqlite3.Connection) -> Dict[str, Any]:
+def analyze_delivery_performance(conn: sqlite3.Connection) -> dict[str, Any]:
     """
     Calculates delivery completion rate, on-time rate, and average delivery duration.
     Discloses excluded counts for deliveries with missing deadlines or cancelled states.
@@ -175,7 +175,7 @@ def analyze_delivery_performance(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
-def analyze_vehicle_performance(conn: sqlite3.Connection, vehicle_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def analyze_vehicle_performance(conn: sqlite3.Connection, vehicle_id: str | None = None) -> list[dict[str, Any]]:
     """Calculates operational distance, average speed, deliveries, and telemetry quality per vehicle."""
     query = "SELECT * FROM vehicles"
     params = []
@@ -240,7 +240,7 @@ def analyze_vehicle_performance(conn: sqlite3.Connection, vehicle_id: Optional[s
     return results
 
 
-def analyze_driver_performance(conn: sqlite3.Connection, driver_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def analyze_driver_performance(conn: sqlite3.Connection, driver_id: str | None = None) -> list[dict[str, Any]]:
     """Calculates completed deliveries, on-time rates, durations, and telemetry availability per driver."""
     query = "SELECT * FROM drivers"
     params = []
@@ -309,7 +309,7 @@ def analyze_driver_performance(conn: sqlite3.Connection, driver_id: Optional[str
     return results
 
 
-def detect_operational_anomalies(conn: sqlite3.Connection, limit: int = 50) -> List[Dict[str, Any]]:
+def detect_operational_anomalies(conn: sqlite3.Connection, limit: int = 50) -> list[dict[str, Any]]:
     """
     Scans the database for operational anomalies:
     1. Kinematic jumps / impossible speeds (> 180 km/h or > 300m in <2s)
@@ -445,5 +445,5 @@ def detect_operational_anomalies(conn: sqlite3.Connection, limit: int = 50) -> L
         })
 
     # Sort all by timestamp descending
-    anomalies.sort(key=lambda x: x["timestamp"] or "", reverse=True)
+    anomalies.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
     return anomalies[:limit]

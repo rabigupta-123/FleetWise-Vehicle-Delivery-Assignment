@@ -1,0 +1,7 @@
+delivery_id,pickup,dropoff,scheduled_time,priority,required_capacity,pickup_lat,pickup_lng,drop_lat,drop_lng
+DEL-SMPL-01,Hub Terminal A,Logistics Depot North,2026-11-01T09:00:00Z,urgent,450,12.9716,77.5946,12.9900,77.6100
+DEL-SMPL-02,Hub Terminal A,Retail Plaza Central,2026-11-01T10:30:00Z,high,800,12.9716,77.5946,12.9350,77.6200
+DEL-SMPL-03,Distribution Center B,Industrial Park South,2026-11-01T11:00:00Z,normal,1100,12.9200,77.5800,12.8900,77.6000
+DEL-SMPL-04,Hub Terminal A,Metro Outpost East,2026-11-01T14:00:00Z,low,250,12.9716,77.5946,12.9600,77.6500
+DEL-SMPL-05,Crossdock Station C,Harbor Gate 4,2026-11-01T16:00:00Z,high,1800,12.9500,77.5500,12.9100,77.5300
+

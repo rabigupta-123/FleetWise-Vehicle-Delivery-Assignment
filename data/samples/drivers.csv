@@ -1,0 +1,7 @@
+driver_id,name,phone,availability_status
+DR-SMPL-01,Driver Alpha,+1-555-0101,available
+DR-SMPL-02,Driver Bravo,+1-555-0102,available
+DR-SMPL-03,Driver Charlie,+1-555-0103,available
+DR-SMPL-04,Driver Delta,+1-555-0104,unavailable
+DR-SMPL-05,Driver Echo,+1-555-0105,available
+

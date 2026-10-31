@@ -2326,117 +2326,55 @@ let _batteryObj = null;
 let _batteryPollTimer = null;
 
 async function inspectBattery() {
-  const isLocalHost = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+  const isDesktop = !/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  let bat;
+  if (typeof inspectDeviceBattery === 'function') {
+    bat = await inspectDeviceBattery({ isDesktop });
+  } else {
+    bat = {
+      status: 'unavailable',
+      reason: 'navigator.getBattery not supported by this browser',
+      source: 'navigator.getBattery',
+      level: null,
+      pct: null,
+      charging: null,
+      chargingState: null,
+      chargingTime: null,
+      dischargingTime: null,
+      label: 'Client Device Battery (Current browser device)',
+      display_status: 'unavailable',
+      is_suspect: false,
+      measured_at: new Date().toISOString(),
+    };
+  }
 
-  // 1. If running on host/localhost, query the OS kernel directly for real physical telemetry
-  if (isLocalHost) {
+  // Subscribe to live battery events if available
+  if (!TRACKING_STATE.batteryCleanup && typeof navigator.getBattery === 'function') {
     try {
-      const hwPower = await apiRequest('/api/system/power-status');
-      if (hwPower && hwPower.supported) {
-        return {
-          supported: true,
-          pct: hwPower.pct,
-          charging: hwPower.charging,
-          chargingTime: hwPower.chargingTime,
-          dischargingTime: hwPower.dischargingTime,
-          timestamp: hwPower.reading_timestamp,
-          source: hwPower.source,
+      _batteryObj = await navigator.getBattery();
+      if (_batteryObj) {
+        const onBatChange = () => {
+          inspectBattery().then((b) => updateBatteryHud(b));
+        };
+        _batteryObj.addEventListener('levelchange', onBatChange);
+        _batteryObj.addEventListener('chargingchange', onBatChange);
+        _batteryObj.addEventListener('chargingtimechange', onBatChange);
+        _batteryObj.addEventListener('dischargingtimechange', onBatChange);
+
+        TRACKING_STATE.batteryCleanup = () => {
+          if (_batteryObj) {
+            _batteryObj.removeEventListener('levelchange', onBatChange);
+            _batteryObj.removeEventListener('chargingchange', onBatChange);
+            _batteryObj.removeEventListener('chargingtimechange', onBatChange);
+            _batteryObj.removeEventListener('dischargingtimechange', onBatChange);
+          }
+          TRACKING_STATE.batteryCleanup = null;
         };
       }
     } catch (_) {}
   }
 
-  // 2. Browser Battery Status API for remote/mobile clients
-  if (typeof navigator.getBattery !== 'function') {
-    return {
-      supported: false,
-      pct: 'OS Privacy Restricted',
-      charging: 'Blocked by Mobile Policy (iOS / Android)',
-      chargingTime: 'Unavailable',
-      dischargingTime: 'Unavailable',
-      timestamp: new Date().toLocaleTimeString([], { hour12: false }),
-      source: 'W3C Privacy Spec (Anti-fingerprinting)',
-    };
-  }
-
-  try {
-    _batteryObj = await navigator.getBattery();
-
-    // Check if Chrome returned its hardcoded privacy stub: level 1.0, charging true, chargingTime 0
-    if (_batteryObj.level === 1.0 && _batteryObj.charging === true && _batteryObj.chargingTime === 0) {
-      try {
-        const hwPower = await apiRequest('/api/system/power-status');
-        if (hwPower && hwPower.supported) {
-          return {
-            supported: true,
-            pct: hwPower.pct,
-            charging: hwPower.charging,
-            chargingTime: hwPower.chargingTime,
-            dischargingTime: hwPower.dischargingTime,
-            timestamp: hwPower.reading_timestamp,
-            source: hwPower.source,
-          };
-        }
-      } catch (_) {}
-    }
-
-    const pct = Math.round(_batteryObj.level * 100);
-    const charging = _batteryObj.charging ? '⚡ Charging (AC/USB)' : '🔋 Discharging (Battery)';
-    const chargingTime = _batteryObj.chargingTime === Infinity || _batteryObj.chargingTime === 0 ? (_batteryObj.charging ? 'Fully charged / AC' : '0 min (Unplugged)') : `${Math.round(_batteryObj.chargingTime / 60)} min`;
-    const dischargingTime = _batteryObj.dischargingTime === Infinity ? (_batteryObj.charging ? 'Operating on AC' : 'Calculating...') : `${Math.round(_batteryObj.dischargingTime / 60)} min`;
-    const timestamp = new Date().toLocaleTimeString([], { hour12: false });
-
-    // Subscribe to live battery events if not already hooked
-    if (!TRACKING_STATE.batteryCleanup && _batteryObj) {
-      const onBatChange = () => {
-        inspectBattery().then((bat) => updateBatteryHud(bat));
-      };
-      _batteryObj.addEventListener('levelchange', onBatChange);
-      _batteryObj.addEventListener('chargingchange', onBatChange);
-      _batteryObj.addEventListener('chargingtimechange', onBatChange);
-      _batteryObj.addEventListener('dischargingtimechange', onBatChange);
-
-      if (!_batteryPollTimer) {
-        _batteryPollTimer = setInterval(() => {
-          inspectBattery().then((bat) => updateBatteryHud(bat));
-        }, 8000);
-      }
-
-      TRACKING_STATE.batteryCleanup = () => {
-        if (_batteryObj) {
-          _batteryObj.removeEventListener('levelchange', onBatChange);
-          _batteryObj.removeEventListener('chargingchange', onBatChange);
-          _batteryObj.removeEventListener('chargingtimechange', onBatChange);
-          _batteryObj.removeEventListener('dischargingtimechange', onBatChange);
-        }
-        if (_batteryPollTimer) {
-          clearInterval(_batteryPollTimer);
-          _batteryPollTimer = null;
-        }
-        TRACKING_STATE.batteryCleanup = null;
-      };
-    }
-
-    return {
-      supported: true,
-      pct: `${pct}%`,
-      charging,
-      chargingTime,
-      dischargingTime,
-      timestamp,
-      source: 'Hardware Battery API',
-    };
-  } catch (_) {
-    return {
-      supported: false,
-      pct: 'OS Privacy Restricted',
-      charging: 'Query restricted',
-      chargingTime: 'Unavailable',
-      dischargingTime: 'Unavailable',
-      timestamp: new Date().toLocaleTimeString([], { hour12: false }),
-      source: 'Mobile OS Privacy Guard',
-    };
-  }
+  return bat;
 }
 
 function updateBatteryHud(bat) {
@@ -2447,17 +2385,113 @@ function updateBatteryHud(bat) {
   const tsEl = document.getElementById('hud-battery-timestamp');
   const lisEl = document.getElementById('hud-battery-listener');
   const badge = document.getElementById('hud-battery-status-badge');
+  const reasonRow = document.getElementById('hud-battery-reason-row');
+  const reasonEl = document.getElementById('hud-battery-reason');
+  const statusEl = document.getElementById('hud-battery-status');
 
-  if (pctEl) pctEl.textContent = bat.pct;
-  if (chgEl) chgEl.textContent = bat.charging;
-  if (ctEl) ctEl.textContent = bat.chargingTime;
-  if (dtEl) dtEl.textContent = bat.dischargingTime;
-  if (tsEl) tsEl.textContent = bat.timestamp;
-  if (lisEl) lisEl.textContent = bat.supported && TRACKING_STATE.batteryCleanup ? 'Active (Live streaming)' : 'Inactive';
-  if (badge) {
-    badge.className = bat.supported ? 'badge badge-sm badge-success' : 'badge badge-sm badge-secondary';
-    badge.textContent = bat.supported ? 'API Supported' : 'Unsupported';
+  if (statusEl) statusEl.textContent = bat.status || 'unknown';
+
+  if (bat.status === 'unavailable') {
+    if (pctEl) {
+      pctEl.textContent = 'Not available';
+      pctEl.className = 'hud-val hud-val-muted';
+    }
+    if (chgEl) chgEl.textContent = '—';
+    if (ctEl) ctEl.textContent = '—';
+    if (dtEl) dtEl.textContent = '—';
+    if (badge) {
+      badge.className = 'badge badge-sm badge-secondary';
+      badge.textContent = 'API Unsupported';
+    }
+    if (reasonRow) reasonRow.style.display = 'flex';
+    if (reasonEl) reasonEl.textContent = bat.reason || 'navigator.getBattery not supported by this browser';
+  } else if (bat.status === 'error') {
+    if (pctEl) {
+      pctEl.textContent = 'Error';
+      pctEl.className = 'hud-val hud-val-danger';
+    }
+    if (chgEl) chgEl.textContent = 'Query failed';
+    if (ctEl) ctEl.textContent = '—';
+    if (dtEl) dtEl.textContent = '—';
+    if (badge) {
+      badge.className = 'badge badge-sm badge-danger';
+      badge.textContent = 'Error';
+    }
+    if (reasonRow) reasonRow.style.display = 'flex';
+    if (reasonEl) reasonEl.textContent = bat.reason || 'Unknown error';
+  } else if (bat.status === 'measured_suspect') {
+    if (pctEl) {
+      pctEl.textContent = bat.pct || '100%';
+      pctEl.className = 'hud-val hud-val-amber';
+    }
+    if (chgEl) chgEl.textContent = bat.charging ? '⚡ Charging (AC/USB)' : '🔋 Discharging';
+    if (ctEl) ctEl.textContent = bat.chargingTime === 0 ? '0 min' : String(bat.chargingTime);
+    if (dtEl) dtEl.textContent = String(bat.dischargingTime);
+    if (badge) {
+      badge.className = 'badge badge-sm badge-warning';
+      badge.textContent = 'browser-reported, unverified';
+    }
+    if (reasonRow) reasonRow.style.display = 'flex';
+    if (reasonEl) reasonEl.textContent = bat.reason || 'Values equal API defaults; browser may not be reading a battery';
+  } else {
+    // status === 'measured'
+    if (pctEl) {
+      pctEl.textContent = bat.pct !== null ? bat.pct : '—';
+      pctEl.className = 'hud-val hud-val-green';
+    }
+    if (chgEl) chgEl.textContent = bat.charging ? '⚡ Charging (AC/USB)' : (bat.charging === false ? '🔋 Discharging (Battery)' : '—');
+    if (ctEl) ctEl.textContent = (bat.chargingTime !== null && bat.chargingTime !== 'Infinity') ? `${bat.chargingTime} min` : '—';
+    if (dtEl) dtEl.textContent = (bat.dischargingTime !== null && bat.dischargingTime !== 'Infinity') ? `${bat.dischargingTime} min` : '—';
+    if (badge) {
+      badge.className = 'badge badge-sm badge-success';
+      badge.textContent = 'Measured';
+    }
+    if (reasonRow) reasonRow.style.display = 'none';
   }
+
+  if (tsEl) tsEl.textContent = bat.measured_at ? bat.measured_at.split('T')[1].slice(0, 8) : new Date().toLocaleTimeString([], { hour12: false });
+  if (lisEl) lisEl.textContent = TRACKING_STATE.batteryCleanup ? 'Active (Live events)' : 'Inactive';
+}
+
+async function inspectServerHostPower() {
+  try {
+    const res = await apiRequest('/system/host-power');
+    if (res && res.supported) {
+      updateServerHostPowerHud(res);
+      return res;
+    }
+  } catch (_) {}
+  updateServerHostPowerHud({ supported: false });
+  return null;
+}
+
+function updateServerHostPowerHud(data) {
+  const pctEl = document.getElementById('hud-host-power-pct');
+  const chgEl = document.getElementById('hud-host-power-charging');
+  const srcEl = document.getElementById('hud-host-power-source');
+  const tsEl = document.getElementById('hud-host-power-timestamp');
+  const badge = document.getElementById('hud-host-power-badge');
+
+  if (!data || !data.supported) {
+    if (pctEl) pctEl.textContent = 'Unavailable / Offline';
+    if (chgEl) chgEl.textContent = '—';
+    if (srcEl) srcEl.textContent = 'Host power unreachable';
+    if (badge) {
+      badge.className = 'badge badge-sm badge-secondary';
+      badge.textContent = 'Host Offline';
+    }
+    return;
+  }
+
+  if (pctEl) pctEl.textContent = data.pct;
+  if (chgEl) chgEl.textContent = data.charging;
+  if (srcEl) srcEl.textContent = data.source;
+  if (tsEl) tsEl.textContent = data.reading_timestamp;
+  if (badge) {
+    badge.className = 'badge badge-sm badge-success';
+    badge.textContent = 'Host Power Live';
+  }
+}
 }
 
 function inspectNetwork() {
@@ -2564,6 +2598,9 @@ async function refreshAllHudCards() {
 
   // Populate Battery Card
   updateBatteryHud(bat);
+
+  // Populate Server Host Power Card (Physical Machine Running Backend)
+  await inspectServerHostPower();
 
   // Populate Network Card
   updateNetworkHud(net);

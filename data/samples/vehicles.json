@@ -1,0 +1,8 @@
+[
+  {"vehicle_id": "V-SMPL-01", "registration_no": "SYN-VAN-01", "type": "van", "capacity": 1200, "status": "available"},
+  {"vehicle_id": "V-SMPL-02", "registration_no": "SYN-TRK-02", "type": "truck", "capacity": 4500, "status": "available"},
+  {"vehicle_id": "V-SMPL-03", "registration_no": "SYN-EV-03", "type": "ev_van", "capacity": 900, "status": "available"},
+  {"vehicle_id": "V-SMPL-04", "registration_no": "SYN-MNT-04", "type": "van", "capacity": 1200, "status": "maintenance"},
+  {"vehicle_id": "V-SMPL-05", "registration_no": "SYN-SPR-05", "type": "sprinter", "capacity": 2200, "status": "available"}
+]
+

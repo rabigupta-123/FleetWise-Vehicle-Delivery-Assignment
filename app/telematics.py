@@ -1,10 +1,9 @@
 import math
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from datetime import UTC, datetime
+from typing import Any
 
 import phonenumbers
-from phonenumbers import carrier, geocoder, number_type
-
+from phonenumbers import carrier, geocoder
 
 # Earth mean radius in meters (WGS 84 / IUGG)
 EARTH_RADIUS_METERS = 6371000.0
@@ -43,10 +42,10 @@ def evaluate_telemetry_step(
     curr_lat: float,
     curr_lon: float,
     curr_timestamp_iso: str,
-    reported_speed_mps: Optional[float] = None,
-    accuracy_m: Optional[float] = None,
+    reported_speed_mps: float | None = None,
+    accuracy_m: float | None = None,
     max_accuracy_threshold_m: float = 150.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Evaluates step kinematics between consecutive GPS fixes:
     Computes distance, time delta, derived speed, detects physical jump outliers,
@@ -87,7 +86,7 @@ def evaluate_telemetry_step(
         }
 
     # 3. Kinematic speed calculation
-    derived_speed_mps: Optional[float] = dist_m / delta_s
+    derived_speed_mps: float | None = dist_m / delta_s
 
     # 4. Implausible jump detection
     is_jump = False
@@ -113,7 +112,7 @@ def evaluate_telemetry_step(
     }
 
 
-def evaluate_timestamp_validity(device_timestamp_iso: str, server_timestamp_iso: str) -> Dict[str, Any]:
+def evaluate_timestamp_validity(device_timestamp_iso: str, server_timestamp_iso: str) -> dict[str, Any]:
     """
     Validates device timestamp against server timestamp to detect stale fixes or severe clock skew.
     """
@@ -133,14 +132,14 @@ def evaluate_timestamp_validity(device_timestamp_iso: str, server_timestamp_iso:
     return {"skew_seconds": round(skew_s, 1), "status": "synchronized"}
 
 
-def compute_freshness_status(server_timestamp_iso: str) -> Dict[str, Any]:
+def compute_freshness_status(server_timestamp_iso: str) -> dict[str, Any]:
     """
     Evaluates location freshness according to server receive time:
     age_seconds = max(0, server_now - server_received_at)
     """
     try:
         ts = datetime.fromisoformat(server_timestamp_iso.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         age_s = max(0.0, (now - ts).total_seconds())
     except Exception:
         return {"age_seconds": None, "tracking_status": "offline"}
@@ -161,7 +160,7 @@ def compute_freshness_status(server_timestamp_iso: str) -> Dict[str, Any]:
     }
 
 
-def normalize_phone_number(raw_phone: str, default_region: str = "IN") -> Dict[str, Any]:
+def normalize_phone_number(raw_phone: str, default_region: str = "IN") -> dict[str, Any]:
     """
     Normalizes a phone string into standard E.164 format and extracts numbering metadata.
     Does NOT infer device GPS or carrier subscriber identity.
@@ -196,7 +195,7 @@ def normalize_phone_number(raw_phone: str, default_region: str = "IN") -> Dict[s
                 }
 
         e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
-        region = geocoder.region_code_for_number(parsed)
+        region = phonenumbers.region_code_for_number(parsed) or geocoder.description_for_number(parsed, "en")
         carrier_name = carrier.name_for_number(parsed, "en") or None
 
         return {

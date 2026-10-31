@@ -13,7 +13,7 @@ Privacy & Integrity Principles:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class BaseTelematicsProvider(ABC):
@@ -24,7 +24,7 @@ class BaseTelematicsProvider(ABC):
         pass
 
     @abstractmethod
-    async def fetch_telemetry_feed(self, device_id: str) -> Optional[Dict[str, Any]]:
+    async def fetch_telemetry_feed(self, device_id: str) -> dict[str, Any] | None:
         pass
 
 
@@ -36,7 +36,7 @@ class BaseIPGeolocationProvider(ABC):
         pass
 
     @abstractmethod
-    async def lookup_ip_approximate(self, ip_address: str) -> Dict[str, Any]:
+    async def lookup_ip_approximate(self, ip_address: str) -> dict[str, Any]:
         """
         Returns approximate city/region geography for an IP.
         Must explicitly label precision as 'city_approximate' and NOT 'gps'.
@@ -52,7 +52,7 @@ class BaseSMSGatewayProvider(ABC):
         pass
 
     @abstractmethod
-    async def send_verification_otp(self, phone_e164: str, otp_code: str) -> Dict[str, Any]:
+    async def send_verification_otp(self, phone_e164: str, otp_code: str) -> dict[str, Any]:
         pass
 
 
@@ -65,7 +65,7 @@ class DevelopmentSimulationSMSGateway(BaseSMSGatewayProvider):
     def get_provider_name(self) -> str:
         return "development_simulation"
 
-    async def send_verification_otp(self, phone_e164: str, otp_code: str) -> Dict[str, Any]:
+    async def send_verification_otp(self, phone_e164: str, otp_code: str) -> dict[str, Any]:
         return {
             "success": True,
             "provider": self.get_provider_name(),
@@ -84,7 +84,7 @@ class UnconfiguredIPGeolocationProvider(BaseIPGeolocationProvider):
     def get_provider_name(self) -> str:
         return "unconfigured_default"
 
-    async def lookup_ip_approximate(self, ip_address: str) -> Dict[str, Any]:
+    async def lookup_ip_approximate(self, ip_address: str) -> dict[str, Any]:
         is_loopback = ip_address in ("127.0.0.1", "::1", "localhost")
         return {
             "ip": ip_address,

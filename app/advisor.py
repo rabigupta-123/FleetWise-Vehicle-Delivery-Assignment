@@ -1,6 +1,5 @@
-from datetime import datetime, timezone
-from typing import Any, Optional
 import sqlite3
+from typing import Any
 
 PRIORITY_WEIGHTS = {"urgent": 4, "high": 3, "normal": 2, "low": 1}
 
@@ -45,7 +44,7 @@ def get_recommendations_for_delivery(delivery_id: str, conn: sqlite3.Connection)
     ).fetchall()
     eligible_drivers = [dict(r) for r in drv_rows]
 
-    recommendations = []
+    recommendations: list[dict[str, Any]] = []
     for v in eligible_vehicles:
         # Vehicle score: best capacity fit (smallest sufficient capacity)
         if req_cap is not None and req_cap > 0:
@@ -76,7 +75,13 @@ def get_recommendations_for_delivery(delivery_id: str, conn: sqlite3.Connection)
             })
 
     # Sort descending by total_score, then ascending by vehicle capacity
-    recommendations.sort(key=lambda x: (-x["total_score"], x["vehicle"]["capacity"]))
+    def _rec_sort_key(item: dict[str, Any]) -> tuple[float, int]:
+        ts = item.get("total_score", 0.0)
+        veh = item.get("vehicle")
+        cap = veh.get("capacity", 0) if isinstance(veh, dict) else 0
+        return (-float(ts), int(cap))
+
+    recommendations.sort(key=_rec_sort_key)
 
     return {
         "delivery_id": delivery_id,
@@ -87,7 +92,7 @@ def get_recommendations_for_delivery(delivery_id: str, conn: sqlite3.Connection)
     }
 
 
-def get_dispatch_next_delivery(conn: sqlite3.Connection) -> Optional[dict[str, Any]]:
+def get_dispatch_next_delivery(conn: sqlite3.Connection) -> dict[str, Any] | None:
     rows = conn.execute(
         """
         SELECT * FROM deliveries

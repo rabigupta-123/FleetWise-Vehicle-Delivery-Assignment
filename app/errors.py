@@ -56,7 +56,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         detail_msg = exc.detail if exc.detail else "An HTTP error occurred."
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": err_code, "message": str(detail_msg)},
+            content={"error": err_code, "message": detail_msg},
         )
 
     @app.exception_handler(Exception)

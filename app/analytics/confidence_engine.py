@@ -7,8 +7,9 @@ All scores are explicitly labeled as "Evidence Confidence Score — Heuristic".
 Statistical calibration requires empirical labeled outcomes; heuristic models reflect
 evidence completeness and logical constraints.
 """
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+from app.math_utils import calculate_capacity_suitability
 
 CONFIDENCE_FORMULA_VERSION = "1.0.0"
 
@@ -20,7 +21,7 @@ def evaluate_device_identity_confidence(
     token_type: str = "client_storage_token",
     phone_verified: bool = False,
     driver_id_match: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Evaluates device identity confidence based on authenticated evidence:
     - HIGH: Authenticated driver + active registered device + persistent token + driver match.
@@ -114,13 +115,13 @@ def evaluate_device_identity_confidence(
 
 
 def evaluate_location_confidence(
-    gps_quality_score: Optional[float],
-    freshness_score: Optional[float],
-    movement_consistency_score: Optional[float],
+    gps_quality_score: float | None,
+    freshness_score: float | None,
+    movement_consistency_score: float | None,
     distinct_observations_count: int,
     data_completeness_pct: float,
     has_jump_anomaly: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Evaluates confidence in location reliability.
     Deduplicates repeated identical fixes so spamming the same coordinates does not inflate confidence.
@@ -210,12 +211,12 @@ def evaluate_location_confidence(
 
 
 def evaluate_assignment_confidence(
-    vehicle: Dict[str, Any],
-    driver: Dict[str, Any],
-    delivery: Dict[str, Any],
+    vehicle: dict[str, Any],
+    driver: dict[str, Any],
+    delivery: dict[str, Any],
     has_active_vehicle_assignment: bool = False,
     has_active_driver_assignment: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Evaluates whether a delivery assignment is valid according to strict operational constraints.
     Hard constraints fail immediately with score 0.0.
@@ -262,17 +263,9 @@ def evaluate_assignment_confidence(
         }
 
     # 2. Eligible Suitability Scoring
-    # Capacity utilization efficiency (sweet spot 50% - 90%)
+    cap_score = calculate_capacity_suitability(del_weight, veh_cap)
     cap_ratio = del_weight / veh_cap if veh_cap > 0 else 0.0
-    if 0.5 <= cap_ratio <= 0.95:
-        cap_score = 100.0
-        supporting.append(f"Optimal capacity utilization: {round(cap_ratio * 100, 1)}%.")
-    elif cap_ratio < 0.5:
-        cap_score = 60.0 + (cap_ratio * 80.0)
-        supporting.append(f"Vehicle underutilized ({round(cap_ratio * 100, 1)}% capacity).")
-    else:
-        cap_score = 75.0
-        supporting.append("Near-maximum capacity utilization.")
+    supporting.append(f"Capacity suitability: {cap_score}/100 ({round(cap_ratio * 100, 1)}% payload ratio).")
 
     # Driver verification bonus
     drv_phone_status = driver.get("phone_verification_status") or "unverified"

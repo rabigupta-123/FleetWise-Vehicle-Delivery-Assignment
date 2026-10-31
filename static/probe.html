@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FleetWise // Device & Battery Capability Probe</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    .probe-container {
+      max-width: 980px;
+      margin: 32px auto;
+      padding: 0 20px;
+    }
+    .probe-header {
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 16px;
+    }
+    .probe-title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--color-foreground);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .probe-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      font-family: var(--font-mono);
+      background: rgba(0, 240, 255, 0.12);
+      color: #00F0FF;
+      border: 1px solid rgba(0, 240, 255, 0.3);
+    }
+    .probe-section {
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .probe-section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #A5F3FC;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .probe-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .probe-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    .probe-label {
+      color: var(--color-muted-foreground);
+    }
+    .probe-value {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--color-foreground);
+      word-break: break-all;
+      text-align: right;
+    }
+    .probe-value.suspect {
+      color: #FBBF24;
+    }
+    .probe-value.confirmed {
+      color: #34D399;
+    }
+    .probe-value.unavailable {
+      color: #94A3B8;
+    }
+    .probe-value.error {
+      color: #F87171;
+    }
+    .probe-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .probe-btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .probe-btn-primary {
+      background: #00F0FF;
+      color: #050B14;
+    }
+    .probe-btn-primary:hover {
+      background: #38BDF8;
+    }
+    .probe-btn-secondary {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--color-foreground);
+      border-color: var(--color-border);
+    }
+    .probe-btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .raw-json-box {
+      margin-top: 16px;
+      background: #030712;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      max-height: 260px;
+      overflow-y: auto;
+      color: #94A3B8;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .probe-log {
+      margin-top: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #64748B;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .probe-log-entry {
+      padding: 3px 0;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+    }
+  </style>
+</head>
+<body>
+  <div class="probe-container">
+    <div class="probe-header">
+      <div class="probe-title">
+        <span>FLEETWISE // DEVICE &amp; BATTERY CAPABILITY PROBE</span>
+        <span class="probe-badge">TRUTHFULNESS COMPLIANT</span>
+      </div>
+      <p style="color:var(--color-muted-foreground); font-size:13px; margin-top:6px;">
+        Queries the current browser runtime directly. Values reflect strictly what APIs return without synthetic defaults or false causes.
+      </p>
+    </div>
+
+    <!-- 1. BATTERY DIAGNOSTICS SECTION -->
+    <section class="probe-section" id="battery-diagnostics-section">
+      <div class="probe-section-title">
+        <span>BATTERY DIAGNOSTICS (CLIENT DEVICE)</span>
+        <span class="probe-badge" id="battery-badge">QUERYING...</span>
+      </div>
+      
+      <div class="probe-grid">
+        <div class="probe-row">
+          <span class="probe-label">Raw Level</span>
+          <span class="probe-value" id="b-raw-level">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Raw Charging</span>
+          <span class="probe-value" id="b-raw-charging">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Raw Charging Time</span>
+          <span class="probe-value" id="b-raw-charging-time">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Raw Discharging Time</span>
+          <span class="probe-value" id="b-raw-discharging-time">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Evaluation Status</span>
+          <span class="probe-value" id="b-status">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Evaluation Display Label</span>
+          <span class="probe-value" id="b-display-status">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Browser Name &amp; Version</span>
+          <span class="probe-value" id="b-browser">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Secure Context (isSecureContext)</span>
+          <span class="probe-value" id="b-secure">—</span>
+        </div>
+        <div class="probe-row" style="grid-column: 1 / -1;">
+          <span class="probe-label">Evaluation Reason</span>
+          <span class="probe-value" id="b-reason" style="font-size:12px; font-weight:normal; color:#E2E8F0;">—</span>
+        </div>
+        <div class="probe-row" style="grid-column: 1 / -1;">
+          <span class="probe-label">Timestamp</span>
+          <span class="probe-value" id="b-timestamp">—</span>
+        </div>
+      </div>
+
+      <div class="probe-actions">
+        <button type="button" class="probe-btn probe-btn-secondary" id="btn-reprobe-battery">Refresh Battery Query</button>
+        <button type="button" class="probe-btn probe-btn-secondary" id="btn-copy-battery-json">Copy Battery JSON</button>
+        <button type="button" class="probe-btn probe-btn-primary" id="btn-send-server-report">Send Probe Report to Server</button>
+      </div>
+
+      <div class="probe-log" id="battery-event-log" title="Live event stream">
+        <div class="probe-log-entry">[Init] Awaiting browser event listeners...</div>
+      </div>
+
+      <div class="raw-json-box" id="raw-json-display">{"status": "initializing"}</div>
+    </section>
+
+    <!-- 2. SERVER HOST POWER SECTION (Ops / Physical Server Isolation) -->
+    <section class="probe-section" id="server-power-section">
+      <div class="probe-section-title">
+        <span>SERVER HOST POWER (PHYSICAL BACKEND MACHINE)</span>
+        <span class="probe-badge" style="background:rgba(52,211,153,0.12); color:#34D399; border-color:rgba(52,211,153,0.3);">BACKEND OS KERNEL</span>
+      </div>
+      <p style="color:var(--color-muted-foreground); font-size:12px; margin-bottom:12px;">
+        This telemetry comes strictly from the machine running the backend server (Win32 GetSystemPowerStatus / psutil) and is completely separate from client devices.
+      </p>
+      <div class="probe-grid">
+        <div class="probe-row">
+          <span class="probe-label">Machine Scope</span>
+          <span class="probe-value" id="srv-scope">Server Host (Backend)</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Host Battery Level</span>
+          <span class="probe-value" id="srv-pct">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Host AC Power Line</span>
+          <span class="probe-value" id="srv-charging">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Host Telemetry Source</span>
+          <span class="probe-value" id="srv-source">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Host Reading Time</span>
+          <span class="probe-value" id="srv-time">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. PLATFORM & CAPABILITIES SECTION -->
+    <section class="probe-section">
+      <div class="probe-section-title">
+        <span>BROWSER ENVIRONMENT &amp; SENSORS</span>
+      </div>
+      <div class="probe-grid">
+        <div class="probe-row">
+          <span class="probe-label">User Agent</span>
+          <span class="probe-value" id="env-ua" style="font-size:11px;">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Screen Dimensions</span>
+          <span class="probe-value" id="env-screen">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Device Memory (RAM)</span>
+          <span class="probe-value" id="env-ram">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Hardware Concurrency</span>
+          <span class="probe-value" id="env-cores">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Geolocation API</span>
+          <span class="probe-value" id="env-geo">—</span>
+        </div>
+        <div class="probe-row">
+          <span class="probe-label">Network Information API</span>
+          <span class="probe-value" id="env-net">—</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/js/battery_telemetry.js"></script>
+  <script>
+    let _latestBatteryDiag = null;
+    let _batteryListenerAttached = false;
+
+    function detectBrowserDetails() {
+      const ua = navigator.userAgent;
+      let browserName = 'Unknown Browser';
+      let browserVersion = 'Unknown Version';
+
+      if (/Edg\/([0-9.]+)/.test(ua)) {
+        browserName = 'Microsoft Edge';
+        browserVersion = RegExp.$1;
+      } else if (/Chrome\/([0-9.]+)/.test(ua)) {
+        browserName = 'Google Chrome';
+        browserVersion = RegExp.$1;
+      } else if (/Firefox\/([0-9.]+)/.test(ua)) {
+        browserName = 'Mozilla Firefox';
+        browserVersion = RegExp.$1;
+      } else if (/Version\/([0-9.]+).*Safari/.test(ua)) {
+        browserName = 'Apple Safari';
+        browserVersion = RegExp.$1;
+      }
+      return { browserName, browserVersion, full: `${browserName} ${browserVersion}` };
+    }
+
+    function appendLog(msg) {
+      const log = document.getElementById('battery-event-log');
+      if (!log) return;
+      const entry = document.createElement('div');
+      entry.className = 'probe-log-entry';
+      entry.textContent = `[${new Date().toISOString().split('T')[1].slice(0, 8)}] ${msg}`;
+      log.prepend(entry);
+    }
+
+    async function runBatteryProbe() {
+      const isDesktop = !/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+      const res = await inspectDeviceBattery({ isDesktop });
+      const browserInfo = detectBrowserDetails();
+      const isSecure = window.isSecureContext === true;
+
+      _latestBatteryDiag = {
+        raw: res.raw,
+        status: res.status,
+        display_status: res.display_status,
+        reason: res.reason,
+        browser_name: browserInfo.browserName,
+        browser_version: browserInfo.browserVersion,
+        browser_full: browserInfo.full,
+        is_secure_context: isSecure,
+        timestamp: res.measured_at,
+        is_suspect: res.is_suspect,
+        label: res.label,
+      };
+
+      // Populate UI
+      document.getElementById('b-raw-level').textContent = res.raw.level !== null ? res.raw.level : 'null';
+      document.getElementById('b-raw-charging').textContent = res.raw.charging !== null ? String(res.raw.charging) : 'null';
+      document.getElementById('b-raw-charging-time').textContent = String(res.raw.chargingTime);
+      document.getElementById('b-raw-discharging-time').textContent = String(res.raw.dischargingTime);
+
+      const statusEl = document.getElementById('b-status');
+      statusEl.textContent = res.status;
+      statusEl.className = 'probe-value ' + (res.status === 'measured' ? 'confirmed' : (res.status === 'measured_suspect' ? 'suspect' : (res.status === 'error' ? 'error' : 'unavailable')));
+
+      const dispEl = document.getElementById('b-display-status');
+      dispEl.textContent = res.display_status;
+      dispEl.className = statusEl.className;
+
+      document.getElementById('b-browser').textContent = browserInfo.full;
+      const secEl = document.getElementById('b-secure');
+      secEl.textContent = isSecure ? 'true (Secure Context Active)' : 'false (Insecure Context)';
+      secEl.className = 'probe-value ' + (isSecure ? 'confirmed' : 'suspect');
+
+      document.getElementById('b-reason').textContent = res.reason || 'None (Direct measurement valid)';
+      document.getElementById('b-timestamp').textContent = res.measured_at;
+
+      const badge = document.getElementById('battery-badge');
+      badge.textContent = res.display_status.toUpperCase();
+      badge.style.color = res.status === 'measured' ? '#34D399' : (res.status === 'measured_suspect' ? '#FBBF24' : '#94A3B8');
+
+      document.getElementById('raw-json-display').textContent = JSON.stringify(_latestBatteryDiag, null, 2);
+
+      // Listeners
+      if (!_batteryListenerAttached && typeof navigator.getBattery === 'function') {
+        try {
+          const b = await navigator.getBattery();
+          if (b) {
+            _batteryListenerAttached = true;
+            b.addEventListener('levelchange', () => { appendLog(`levelchange event: ${b.level}`); runBatteryProbe(); });
+            b.addEventListener('chargingchange', () => { appendLog(`chargingchange event: ${b.charging}`); runBatteryProbe(); });
+            b.addEventListener('chargingtimechange', () => { appendLog(`chargingtimechange event: ${b.chargingTime}`); runBatteryProbe(); });
+            b.addEventListener('dischargingtimechange', () => { appendLog(`dischargingtimechange event: ${b.dischargingTime}`); runBatteryProbe(); });
+            appendLog('Attached BatteryManager event listeners successfully');
+          }
+        } catch (e) {
+          appendLog(`Battery listener error: ${e.message}`);
+        }
+      }
+    }
+
+    async function loadServerHostPower() {
+      try {
+        const resp = await fetch('/system/host-power');
+        if (resp.ok) {
+          const data = await resp.json();
+          document.getElementById('srv-pct').textContent = data.pct || 'Unavailable';
+          document.getElementById('srv-charging').textContent = data.charging || 'Unavailable';
+          document.getElementById('srv-source').textContent = data.source || 'Unknown';
+          document.getElementById('srv-time').textContent = data.reading_timestamp || '—';
+        }
+      } catch (e) {
+        document.getElementById('srv-pct').textContent = 'Server Offline / Unreachable';
+      }
+    }
+
+    function populateEnvironment() {
+      document.getElementById('env-ua').textContent = navigator.userAgent;
+      document.getElementById('env-screen').textContent = `${screen.width}x${screen.height} (@${window.devicePixelRatio || 1}x)`;
+      document.getElementById('env-ram').textContent = navigator.deviceMemory ? `${navigator.deviceMemory} GB` : 'API Unavailable';
+      document.getElementById('env-cores').textContent = navigator.hardwareConcurrency ? `${navigator.hardwareConcurrency} logical cores` : 'API Unavailable';
+      document.getElementById('env-geo').textContent = ('geolocation' in navigator) ? 'Supported' : 'Unsupported';
+      document.getElementById('env-net').textContent = ('connection' in navigator) ? 'Supported' : 'Unsupported';
+    }
+
+    document.getElementById('btn-reprobe-battery').addEventListener('click', runBatteryProbe);
+    document.getElementById('btn-copy-battery-json').addEventListener('click', () => {
+      if (_latestBatteryDiag) {
+        navigator.clipboard.writeText(JSON.stringify(_latestBatteryDiag, null, 2)).then(() => {
+          alert('Battery diagnostics JSON copied to clipboard!');
+        });
+      }
+    });
+    document.getElementById('btn-send-server-report').addEventListener('click', async () => {
+      if (!_latestBatteryDiag) return;
+      try {
+        const resp = await fetch('/probe/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            battery: _latestBatteryDiag,
+            userAgent: navigator.userAgent,
+            isSecureContext: window.isSecureContext === true,
+            timestamp: new Date().toISOString()
+          })
+        });
+        const data = await resp.json();
+        alert(`Report recorded successfully! Report ID: ${data.report_id}`);
+      } catch (e) {
+        alert('Failed to send report: ' + e.message);
+      }
+    });
+
+    populateEnvironment();
+    runBatteryProbe();
+    loadServerHostPower();
+  </script>
+</body>
+</html>
+

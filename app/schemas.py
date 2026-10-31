@@ -1,6 +1,7 @@
 import re
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -20,7 +21,7 @@ PHONE_REGEX = re.compile(r"^\+?[0-9\-\s\(\)]{7,30}$")
 
 
 class VehicleCreate(BaseModel):
-    vehicle_id: Optional[str] = Field(default=None, max_length=50)
+    vehicle_id: str | None = Field(default=None, max_length=50)
     registration_no: str = Field(..., min_length=1, max_length=50)
     type: str = Field(default="Van", min_length=1, max_length=50)
     capacity: int = Field(..., gt=0)
@@ -44,7 +45,7 @@ class VehicleCreate(BaseModel):
 
     @field_validator("vehicle_id")
     @classmethod
-    def strip_id(cls, v: Optional[str]) -> Optional[str]:
+    def strip_id(cls, v: str | None) -> str | None:
         if v is None:
             return None
         s = v.strip()
@@ -56,7 +57,7 @@ class VehicleStatusPatch(BaseModel):
 
 
 class DriverCreate(BaseModel):
-    driver_id: Optional[str] = Field(default=None, max_length=50)
+    driver_id: str | None = Field(default=None, max_length=50)
     name: str = Field(..., min_length=1, max_length=100)
     phone: str = Field(..., min_length=7, max_length=30)
     availability_status: Literal["available", "unavailable"] = "available"
@@ -79,7 +80,7 @@ class DriverCreate(BaseModel):
 
     @field_validator("driver_id")
     @classmethod
-    def strip_id(cls, v: Optional[str]) -> Optional[str]:
+    def strip_id(cls, v: str | None) -> str | None:
         if v is None:
             return None
         s = v.strip()
@@ -91,16 +92,16 @@ class DriverStatusPatch(BaseModel):
 
 
 class DeliveryCreate(BaseModel):
-    delivery_id: Optional[str] = Field(default=None, max_length=50)
+    delivery_id: str | None = Field(default=None, max_length=50)
     pickup: str = Field(..., min_length=1, max_length=255)
     dropoff: str = Field(..., min_length=1, max_length=255)
     scheduled_time: str = Field(..., min_length=1)
     priority: Literal["low", "normal", "high", "urgent"] = "normal"
-    required_capacity: Optional[int] = Field(default=None, gt=0)
-    pickup_lat: Optional[float] = None
-    pickup_lng: Optional[float] = None
-    drop_lat: Optional[float] = None
-    drop_lng: Optional[float] = None
+    required_capacity: int | None = Field(default=None, gt=0)
+    pickup_lat: float | None = None
+    pickup_lng: float | None = None
+    drop_lat: float | None = None
+    drop_lng: float | None = None
 
     @field_validator("pickup", "dropoff")
     @classmethod
@@ -117,7 +118,7 @@ class DeliveryCreate(BaseModel):
 
     @field_validator("delivery_id")
     @classmethod
-    def strip_id(cls, v: Optional[str]) -> Optional[str]:
+    def strip_id(cls, v: str | None) -> str | None:
         if v is None:
             return None
         s = v.strip()
@@ -127,7 +128,7 @@ class DeliveryCreate(BaseModel):
 class AssignRequest(BaseModel):
     vehicle_id: str = Field(..., min_length=1, max_length=50)
     driver_id: str = Field(..., min_length=1, max_length=50)
-    version: Optional[int] = None
+    version: int | None = None
 
     @field_validator("vehicle_id", "driver_id")
     @classmethod
@@ -140,8 +141,8 @@ class AssignRequest(BaseModel):
 
 class DeliveryStatusPatch(BaseModel):
     status: str = Field(..., min_length=1)
-    reason: Optional[str] = None
-    version: Optional[int] = None
+    reason: str | None = None
+    version: int | None = None
 
 
 class DriverPhonePatch(BaseModel):
@@ -158,8 +159,8 @@ class DriverPhonePatch(BaseModel):
 
 class TrackingSessionStart(BaseModel):
     driver_id: str = Field(..., min_length=1, max_length=50)
-    device_id: Optional[str] = Field(default=None, max_length=50)
-    device_info: Optional[str] = Field(default=None, max_length=255)
+    device_id: str | None = Field(default=None, max_length=50)
+    device_info: str | None = Field(default=None, max_length=255)
 
 
 class TrackingSessionStop(BaseModel):
@@ -168,15 +169,15 @@ class TrackingSessionStop(BaseModel):
 
 class GPSLocationCreate(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=50)
-    device_id: Optional[str] = Field(default=None, max_length=50)
-    driver_id: Optional[str] = Field(default=None, max_length=50)
+    device_id: str | None = Field(default=None, max_length=50)
+    driver_id: str | None = Field(default=None, max_length=50)
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     accuracy: float = Field(..., ge=0.0)
-    altitude: Optional[float] = None
-    altitude_accuracy: Optional[float] = Field(default=None, ge=0.0)
-    speed: Optional[float] = Field(default=None, ge=0.0)
-    heading: Optional[float] = Field(default=None, ge=0.0, le=360.0)
+    altitude: float | None = None
+    altitude_accuracy: float | None = Field(default=None, ge=0.0)
+    speed: float | None = Field(default=None, ge=0.0)
+    heading: float | None = Field(default=None, ge=0.0, le=360.0)
     device_timestamp: str = Field(..., min_length=1)
 
     @field_validator("device_timestamp")
@@ -188,19 +189,19 @@ class GPSLocationCreate(BaseModel):
 class DeviceRegisterRequest(BaseModel):
     driver_id: str = Field(..., min_length=1, max_length=50)
     nickname: str = Field(..., min_length=1, max_length=80)
-    device_category: Optional[str] = Field(default=None, max_length=50)
-    model: Optional[str] = Field(default=None, max_length=100)
-    os_family: Optional[str] = Field(default=None, max_length=50)
-    os_version: Optional[str] = Field(default=None, max_length=50)
-    browser_family: Optional[str] = Field(default=None, max_length=50)
-    browser_version: Optional[str] = Field(default=None, max_length=50)
-    platform: Optional[str] = Field(default=None, max_length=50)
-    screen_res: Optional[str] = Field(default=None, max_length=100)
-    capabilities: Optional[dict] = None
+    device_category: str | None = Field(default=None, max_length=50)
+    model: str | None = Field(default=None, max_length=100)
+    os_family: str | None = Field(default=None, max_length=50)
+    os_version: str | None = Field(default=None, max_length=50)
+    browser_family: str | None = Field(default=None, max_length=50)
+    browser_version: str | None = Field(default=None, max_length=50)
+    platform: str | None = Field(default=None, max_length=50)
+    screen_res: str | None = Field(default=None, max_length=100)
+    capabilities: dict | None = None
     permission_status: Literal["granted", "prompt", "denied"] = "prompt"
-    client_device_token: Optional[str] = Field(default=None, max_length=100)
-    identity_confidence: Optional[str] = Field(default="client_storage_token", max_length=50)
-    detection_limitations: Optional[str] = Field(default=None, max_length=200)
+    client_device_token: str | None = Field(default=None, max_length=100)
+    identity_confidence: str | None = Field(default="client_storage_token", max_length=50)
+    detection_limitations: str | None = Field(default=None, max_length=200)
 
     @field_validator("nickname")
     @classmethod
@@ -225,7 +226,7 @@ class DeviceRenameRequest(BaseModel):
 
 
 class DeviceRevokeRequest(BaseModel):
-    reason: Optional[str] = Field(default="Revoked by operator", max_length=200)
+    reason: str | None = Field(default="Revoked by operator", max_length=200)
 
 
 class PhoneVerificationRequest(BaseModel):

@@ -1,0 +1,7 @@
+vehicle_id,registration_no,type,capacity,status
+V-SMPL-01,SYN-VAN-01,van,1200,available
+V-SMPL-02,SYN-TRK-02,truck,4500,available
+V-SMPL-03,SYN-EV-03,ev_van,900,available
+V-SMPL-04,SYN-MNT-04,van,1200,maintenance
+V-SMPL-05,SYN-SPR-05,sprinter,2200,available
+

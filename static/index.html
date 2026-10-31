@@ -1203,16 +1203,20 @@
                 </div>
               </div>
 
-              <!-- CARD 2: BATTERY INTELLIGENCE -->
+              <!-- CARD 2: CLIENT DEVICE BATTERY -->
               <div class="hud-card">
                 <div class="hud-card-header">
-                  <h4 class="hud-card-title"><span data-icon="zap"></span> BATTERY INTELLIGENCE</h4>
+                  <h4 class="hud-card-title"><span data-icon="zap"></span> CLIENT DEVICE BATTERY</h4>
                   <span class="badge badge-sm" id="hud-battery-status-badge">API Check</span>
                 </div>
                 <div class="hud-data-list">
                   <div class="hud-row">
+                    <span class="hud-label">Machine Scope</span>
+                    <span class="hud-val hud-val-accent">Current Browser Device</span>
+                  </div>
+                  <div class="hud-row">
                     <span class="hud-label">Battery Level</span>
-                    <span class="hud-val hud-val-green" id="hud-battery-pct">Checking...</span>
+                    <span class="hud-val" id="hud-battery-pct">—</span>
                   </div>
                   <div class="hud-row">
                     <span class="hud-label">Charging State</span>
@@ -1227,12 +1231,20 @@
                     <span class="hud-val" id="hud-battery-discharging-time">—</span>
                   </div>
                   <div class="hud-row">
+                    <span class="hud-label">Telemetry Status</span>
+                    <span class="hud-val mono" id="hud-battery-status">—</span>
+                  </div>
+                  <div class="hud-row">
                     <span class="hud-label">Reading Timestamp</span>
                     <span class="hud-val mono" id="hud-battery-timestamp">Awaiting query</span>
                   </div>
                   <div class="hud-row">
                     <span class="hud-label">Live Event Listener</span>
                     <span class="hud-val" id="hud-battery-listener">Inactive</span>
+                  </div>
+                  <div class="hud-row" id="hud-battery-reason-row" style="display:none;">
+                    <span class="hud-label">Note / Reason</span>
+                    <span class="hud-val hud-val-muted" id="hud-battery-reason" style="font-size:11px; white-space:normal;">—</span>
                   </div>
                 </div>
               </div>
@@ -1301,6 +1313,40 @@
                   <div class="hud-row">
                     <span class="hud-label">Device Revocation</span>
                     <span class="hud-val hud-val-green" id="hud-device-revocation-state">Active &bull; Valid</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- CARD 5: SERVER HOST POWER (PHYSICAL BACKEND MACHINE) -->
+              <div class="hud-card">
+                <div class="hud-card-header">
+                  <h4 class="hud-card-title"><span data-icon="cpu"></span> SERVER HOST POWER</h4>
+                  <span class="badge badge-sm badge-success" id="hud-host-power-badge">Host Power Live</span>
+                </div>
+                <div class="hud-data-list">
+                  <div class="hud-row">
+                    <span class="hud-label">Machine Scope</span>
+                    <span class="hud-val hud-val-green">Server Host (Backend)</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Host Battery Level</span>
+                    <span class="hud-val hud-val-green" id="hud-host-power-pct">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Host Power Line</span>
+                    <span class="hud-val" id="hud-host-power-charging">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Telemetry Source</span>
+                    <span class="hud-val mono" id="hud-host-power-source">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Host Reading Time</span>
+                    <span class="hud-val mono" id="hud-host-power-timestamp">—</span>
+                  </div>
+                  <div class="hud-row">
+                    <span class="hud-label">Separation Guarantee</span>
+                    <span class="hud-val hud-val-muted" style="font-size:11px;">Isolated from client browser</span>
                   </div>
                 </div>
               </div>
@@ -2147,6 +2193,7 @@
   <!-- Local Vendored Leaflet Map Engine (Zero CDN Dependency) -->
   <script src="/static/vendor/leaflet/leaflet.js"></script>
   <script src="/static/vendor/qrcode.js"></script>
+  <script src="/static/js/battery_telemetry.js"></script>
   <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

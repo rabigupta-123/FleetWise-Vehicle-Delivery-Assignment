@@ -1,11 +1,12 @@
+import base64
 import hashlib
 import hmac
+import json
 import os
 import secrets
-import json
-import base64
-from typing import Optional
+
 from fastapi import Request, Response
+
 from app.errors import AppError
 
 SESSION_COOKIE_NAME = "fleetwise_session"
@@ -19,7 +20,7 @@ DEFAULT_USERS = {
 }
 
 
-def hash_password(password: str, salt: Optional[str] = None) -> str:
+def hash_password(password: str, salt: str | None = None) -> str:
     if not salt:
         salt = secrets.token_hex(16)
     hashed = hashlib.scrypt(password.encode("utf-8"), salt=salt.encode("utf-8"), n=16384, r=8, p=1).hex()
@@ -42,7 +43,7 @@ def sign_session_data(data: dict) -> str:
     return f"{b64_data}.{sig}"
 
 
-def verify_session_token(token: str) -> Optional[dict]:
+def verify_session_token(token: str) -> dict | None:
     try:
         if not token or "." not in token:
             return None
@@ -56,7 +57,9 @@ def verify_session_token(token: str) -> Optional[dict]:
         return None
 
 
-def get_current_user(request: Request) -> Optional[dict]:
+def get_current_user(request: Request | None) -> dict | None:
+    if request is None:
+        return None
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         # Also check Authorization: Bearer <token>
@@ -90,7 +93,7 @@ ROLE_PERMISSIONS = {
 }
 
 
-def check_permission(user: Optional[dict], required_perm: str, request: Optional[Request] = None) -> None:
+def check_permission(user: dict | None, required_perm: str, request: Request | None = None) -> None:
     # If request originates from a public tunnel or FORCE_AUTH is active, authentication is strictly mandatory
     if request:
         host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""

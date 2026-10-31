@@ -1,0 +1,3 @@
+# Pyrefly Configuration for FleetWise
+search-path = ["."]
+python-version = "3.12"
