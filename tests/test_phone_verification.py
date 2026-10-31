@@ -77,3 +77,36 @@ def test_phone_verification_challenge_flow(client: TestClient, temp_db: str):
     assert res_re.status_code == 400
     assert res_re.json()["error"] == "CHALLENGE_INACTIVE"
 
+
+def test_otp_hmac_sha256_salt_and_dev_mode_isolation(client: TestClient, temp_db: str, monkeypatch):
+    import sqlite3
+    # 1. Verify per-challenge random salt and HMAC-SHA256 format
+    client.post("/drivers", json={"driver_id": "DR-OTP-SALT", "name": "Salt Tester", "phone": "+91 99999 11111"})
+    res1 = client.post("/drivers/DR-OTP-SALT/phone/request-verification")
+    assert res1.status_code == 200
+    assert res1.json()["disclaimer"] == "DEV MODE - no SMS is sent"
+    assert res1.json()["is_dev_mode"] is True
+    vid1 = res1.json()["verification_id"]
+
+    # Check database storage of salt and hash
+    conn = sqlite3.connect(temp_db)
+    row = conn.execute("SELECT code_hash FROM phone_verifications WHERE verification_id = ?", (vid1,)).fetchone()
+    conn.close()
+    assert row is not None
+    code_hash = row[0]
+    assert ":" in code_hash
+    salt, digest = code_hash.split(":", 1)
+    assert len(salt) == 32  # 16 bytes hex
+    assert len(digest) == 64  # sha256 hex
+
+    # 2. In non-dev mode with SMS provider configured, code is NEVER revealed in response
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SMS_PROVIDER_API_KEY", "real_or_mock_sms_api_key")
+    res_prod = client.post("/drivers/DR-OTP-SALT/phone/request-verification")
+    assert res_prod.status_code == 200
+    prod_data = res_prod.json()
+    assert prod_data["is_dev_mode"] is False
+    assert prod_data["dev_verification_code"] is None
+    assert prod_data["dev_challenge_code"] is None
+    assert "SMS verification code dispatched" in prod_data["disclaimer"]
+

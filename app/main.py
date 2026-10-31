@@ -731,7 +731,10 @@ def request_driver_phone_verification(driver_id: str, request: Request):
         )
 
         code = f"{secrets.randbelow(900000) + 100000}"
-        code_hash = hashlib.sha256((code + driver_id).encode()).hexdigest()
+        salt = secrets.token_hex(16)
+        server_secret = os.environ.get("SESSION_SECRET_KEY", "fleetwise_default_super_secret_session_key_32bytes").encode("utf-8")
+        code_digest = hmac.new(server_secret, (salt + code).encode("utf-8"), hashlib.sha256).hexdigest()
+        code_hash = f"{salt}:{code_digest}"
         verification_id = f"VRF-{uuid.uuid4().hex[:10].upper()}"
         now_str = utc_now_iso()
         exp_str = (datetime.now(UTC) + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -751,17 +754,19 @@ def request_driver_phone_verification(driver_id: str, request: Request):
             (driver_id,),
         )
 
+        sms_configured = bool(os.environ.get("SMS_PROVIDER_API_KEY") or os.environ.get("TWILIO_ACCOUNT_SID"))
+        is_dev_mode = (not sms_configured) or os.environ.get("APP_ENV", "development").lower() == "development"
         challenge_data = {
             "verification_id": verification_id,
             "driver_id": driver_id,
             "phone_e164": phone_e164,
             "status": "pending",
             "expires_at": exp_str,
-            "mode": "development",
-            "is_dev_mode": True,
-            "disclaimer": "DEV MODE - no SMS is sent",
-            "dev_verification_code": code,
-            "dev_challenge_code": code,
+            "mode": "development" if is_dev_mode else "production",
+            "is_dev_mode": is_dev_mode,
+            "disclaimer": "DEV MODE - no SMS is sent" if not sms_configured else "SMS verification code dispatched",
+            "dev_verification_code": code if is_dev_mode else None,
+            "dev_challenge_code": code if is_dev_mode else None,
             "message": f"Verification challenge created for {phone_e164}. Enter the 6-digit code to complete verification.",
         }
         write_audit(conn, actor=actor, action="request_phone_verification", entity="driver", entity_id=driver_id, after={"verification_id": verification_id, "phone_e164": phone_e164})
@@ -804,8 +809,17 @@ def verify_driver_phone(driver_id: str, body: PhoneVerifyCodeRequest, request: R
         except ValueError:
             pass
 
-        expected_hash = hashlib.sha256((body.code.strip() + driver_id).encode()).hexdigest()
-        if hmac.compare_digest(expected_hash, vrf["code_hash"]):
+        server_secret = os.environ.get("SESSION_SECRET_KEY", "fleetwise_default_super_secret_session_key_32bytes").encode("utf-8")
+        stored_hash = vrf["code_hash"]
+        if ":" in stored_hash:
+            salt, stored_digest = stored_hash.split(":", 1)
+            expected_digest = hmac.new(server_secret, (salt + body.code.strip()).encode("utf-8"), hashlib.sha256).hexdigest()
+            is_valid_code = hmac.compare_digest(expected_digest, stored_digest)
+        else:
+            expected_hash = hashlib.sha256((body.code.strip() + driver_id).encode()).hexdigest()
+            is_valid_code = hmac.compare_digest(expected_hash, stored_hash)
+
+        if is_valid_code:
             conn.execute("UPDATE phone_verifications SET status = 'verified' WHERE verification_id = ?", (body.verification_id,))
             conn.execute("UPDATE drivers SET phone_verification_status = 'verified' WHERE driver_id = ?", (driver_id,))
             result = {
