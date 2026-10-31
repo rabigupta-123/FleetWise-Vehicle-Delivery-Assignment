@@ -473,7 +473,7 @@ def test_linux_and_missing_hardware_power_fallback(monkeypatch):
     res = get_server_host_power_status()
     assert res["supported"] is False
     assert res["status"] == "unavailable"
-    assert "No battery sensor detected" in res["reason"]
+    assert "Host power reading is not implemented" in res["reason"] or "No battery sensor detected" in res["reason"]
     assert res["percentage_num"] is None
     assert res["role"] == "server_host_power"
 

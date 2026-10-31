@@ -38,14 +38,18 @@ from app.analytics.deep_analysis import (
     detect_operational_anomalies,
 )
 from app.auth import (
-    DEFAULT_USERS,
+    SESSION_COOKIE_NAME,
+    check_login_rate_limit,
     check_permission,
     clear_session_cookie,
     get_current_user,
-    hash_password,
+    is_auth_enabled,
+    record_login_failure,
+    record_login_success,
     set_session_cookie,
     verify_password,
 )
+from app.clock import get_current_time, utc_now_iso
 from app.config import get_gps_retention_days
 from app.db import (
     get_connection,
@@ -53,7 +57,6 @@ from app.db import (
     init_db,
     purge_old_gps_telemetry,
     read_conn,
-    utc_now_iso,
     write_audit,
 )
 from app.errors import AppError, register_exception_handlers
@@ -110,23 +113,46 @@ def broadcast_event(event_type: str, data: Any):
 async def lifespan(app: FastAPI):
     init_db()
     retention_days = get_gps_retention_days()
-    # Seed default users and purge expired GPS fixes on startup
+    # Purge expired GPS fixes on startup
     with immediate_transaction() as conn:
         purge_old_gps_telemetry(conn, retention_days)
-        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        if count == 0:
-            for uname, udata in DEFAULT_USERS.items():
-                conn.execute(
-                    "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-                    (uname, hash_password(udata["password"]), udata["role"], utc_now_iso()),
-                )
-    yield
+
+    # Recurring background task: purge expired GPS fixes every hour
+    async def _recurring_gps_purge():
+        while True:
+            try:
+                await asyncio.sleep(3600)
+                r_days = get_gps_retention_days()
+                with immediate_transaction() as p_conn:
+                    purge_old_gps_telemetry(p_conn, r_days)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    purge_task = None
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        purge_task = asyncio.create_task(_recurring_gps_purge())
+
+    try:
+        yield
+    finally:
+        if purge_task is not None:
+            purge_task.cancel()
+            try:
+                await purge_task
+            except asyncio.CancelledError:
+                pass
 
 
+enable_docs = os.environ.get("FLEETWISE_ENABLE_DOCS") == "1"
 app = FastAPI(
     title="FleetWise — Vehicle & Delivery Assignment",
     version="2.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if enable_docs else None,
+    redoc_url="/redoc" if enable_docs else None,
+    openapi_url="/openapi.json" if enable_docs else None,
 )
 
 register_exception_handlers(app)
@@ -151,18 +177,45 @@ async def security_headers_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def require_auth_middleware(request: Request, call_next):
-    require_auth = os.environ.get("REQUIRE_AUTH", "").lower() in ("1", "true", "yes") or os.environ.get("FORCE_AUTH", "").lower() in ("1", "true", "yes")
-    if require_auth:
-        path = request.url.path
-        public_exact = {"/", "/health", "/auth/login", "/probe", "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
-        is_public = path in public_exact or path.startswith("/static")
-        if not is_public:
-            user = get_current_user(request)
-            if user is None:
-                return JSONResponse(
-                    status_code=401,
-                    content={"error": "UNAUTHORIZED", "message": "Authentication required. Please log in."},
-                )
+    path = request.url.path
+    public_allowlist = {"/", "/health", "/auth/login", "/probe", "/probe/report"}
+    is_public = path in public_allowlist or path.startswith("/static")
+
+    # API docs authorization
+    if path in ("/docs", "/redoc", "/openapi.json"):
+        if not enable_docs:
+            return JSONResponse(status_code=404, content={"error": "NOT_FOUND", "message": "Documentation disabled."})
+        user = get_current_user(request)
+        if not user or user.get("role") != "ops_lead":
+            return JSONResponse(status_code=403, content={"error": "FORBIDDEN", "message": "API documentation requires ops_lead privilege."})
+        return await call_next(request)
+
+    # Auth verification on non-public routes
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    is_tunnel = any(d in host.lower() for d in [".loca.lt", ".ngrok-free.app", ".trycloudflare.com"])
+
+    if (is_auth_enabled() or is_tunnel) and not is_public:
+        user = get_current_user(request)
+        if user is None:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "UNAUTHORIZED", "message": "Authentication required. Please log in."},
+            )
+
+        # CSRF origin verification on state-changing requests using cookie auth
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.cookies.get(SESSION_COOKIE_NAME):
+            origin = request.headers.get("origin")
+            referer = request.headers.get("referer")
+            host = request.headers.get("host", "").split(":")[0]
+            check_url = origin or referer
+            if check_url and host:
+                check_host = check_url.split("://")[-1].split("/")[0].split(":")[0]
+                if check_host.lower() not in (host.lower(), "localhost", "127.0.0.1"):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": "CSRF_FAILED", "message": "Cross-site request forgery protection rejected this request."},
+                    )
+
     return await call_next(request)
 
 
@@ -259,25 +312,27 @@ async def login(request: Request, response: Response):
     if not username or not password:
         raise AppError(400, "VALIDATION_ERROR", "Username and password are required.")
 
+    check_login_rate_limit(username)
+
     with read_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-        if not row:
-            if username in DEFAULT_USERS and password == DEFAULT_USERS[username]["password"]:
-                user_data = {"username": username, "role": DEFAULT_USERS[username]["role"]}
-                set_session_cookie(response, user_data)
-                return {"message": "Logged in successfully", "user": user_data}
+        if not row or not verify_password(password, row["password_hash"]):
+            record_login_failure(username)
             raise AppError(401, "UNAUTHORIZED", "Invalid username or password.")
-        if not verify_password(password, row["password_hash"]):
-            raise AppError(401, "UNAUTHORIZED", "Invalid username or password.")
-        user_data = {"username": row["username"], "role": row["role"]}
+        record_login_success(username)
+        user_data = {
+            "username": row["username"],
+            "role": row["role"],
+            "must_change_password": bool(row["must_change_password"]) if "must_change_password" in row.keys() else False,
+        }
 
-    set_session_cookie(response, user_data)
-    return {"message": "Logged in successfully", "user": user_data}
+    token = set_session_cookie(response, user_data, request)
+    return {"message": "Logged in successfully", "user": user_data, "token": token}
 
 
 @app.post("/auth/logout")
-def logout(response: Response):
-    clear_session_cookie(response)
+def logout(request: Request, response: Response):
+    clear_session_cookie(response, request)
     return {"message": "Logged out successfully"}
 
 
@@ -294,7 +349,6 @@ def get_me(request: Request):
 # -------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
-    init_db()
     with read_conn() as conn:
         journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
         fk_enabled = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
@@ -2469,7 +2523,7 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         ).fetchone()
 
         now_str = utc_now_iso()
-        now_dt = datetime.now(UTC)
+        now_dt = get_current_time()
         ts_validity = evaluate_timestamp_validity(body.device_timestamp, now_str)
 
         if last_fix:
@@ -2490,8 +2544,8 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             if delta_dev_s == 0.0 and abs(body.latitude - last_fix["latitude"]) < 0.00001 and abs(body.longitude - last_fix["longitude"]) < 0.00001:
                 raise AppError(409, "DUPLICATE_FIX", "Duplicate GPS fix detected with identical timestamp and coordinates.")
 
-            # 2. Device clock rate limit throttled (minimum 0.8s interval between sequential fixes)
-            if 0.0 <= delta_dev_s < 0.8:
+            # 2. Rate limit throttled (minimum 0.8s interval between sequential fixes)
+            if abs(delta_dev_s) < 0.8:
                 raise AppError(429, "RATE_LIMITED", "GPS update throttled: minimum interval between fixes is 1 second.")
 
         # Re-verify active vehicle & delivery assignment

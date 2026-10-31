@@ -58,7 +58,12 @@ def snapshot_db(db_path: str) -> dict[str, list[dict[str, Any]]]:
 def temp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     db_file = str(tmp_path / "test_fleetwise.db")
     monkeypatch.setenv("DATABASE_PATH", db_file)
+    monkeypatch.setenv("FLEETWISE_INSECURE_DEV", "1")
     init_db(db_file)
+    from scripts.create_user import create_user
+    create_user("dispatcher", "dispatcher", "DispatcherSecurePass123!", db_path=db_file)
+    create_user("fleet_manager", "fleet_manager", "FleetManagerSecurePass123!", db_path=db_file)
+    create_user("ops_lead", "ops_lead", "OpsLeadSecurePass123!", db_path=db_file)
     return db_file
 
 

@@ -2,6 +2,7 @@ import { icon } from './icons.js';
 
 const STATE = {
   activeView: 'dashboard',
+  currentUser: null,
   metrics: {
     available_fleet: 0,
     total_vehicles: 0,
@@ -204,6 +205,81 @@ async function apiRequest(path, options = {}) {
   return data;
 }
 
+
+/* ==================== AUTHENTICATION & SESSION ==================== */
+async function checkAuthSession() {
+  try {
+    const res = await fetch('/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      STATE.currentUser = data.user || data;
+      renderUserSession();
+      return true;
+    }
+  } catch (_) {}
+  STATE.currentUser = null;
+  renderUserSession();
+  return false;
+}
+
+function renderUserSession() {
+  const chip = document.getElementById('user-session-chip');
+  const btnLogin = document.getElementById('btn-open-login');
+  const nameDisp = document.getElementById('user-name-display');
+  const roleBadge = document.getElementById('user-role-badge');
+  if (STATE.currentUser) {
+    if (nameDisp) nameDisp.textContent = STATE.currentUser.username || 'Operator';
+    if (roleBadge) roleBadge.textContent = (STATE.currentUser.role || 'USER').toUpperCase();
+    if (chip) chip.classList.remove('hidden');
+    if (btnLogin) btnLogin.classList.add('hidden');
+  } else {
+    if (chip) chip.classList.add('hidden');
+    if (btnLogin) btnLogin.classList.remove('hidden');
+  }
+}
+
+async function loginUser(username, password) {
+  const errBox = document.getElementById('login-error-box');
+  if (errBox) errBox.classList.add('hidden');
+  const submitBtn = document.getElementById('btn-submit-login');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Authentication failed');
+    }
+    STATE.currentUser = data.user;
+    renderUserSession();
+    closeModal('modal-auth-login');
+    showToast(`Welcome back, ${data.user.username}! Operations console active.`);
+    await refreshAllData(false);
+  } catch (err) {
+    if (errBox) {
+      errBox.innerHTML = `<strong>AUTHENTICATION_FAILED:</strong> ${escapeHtml(err.message)}`;
+      errBox.classList.remove('hidden');
+    } else {
+      showToast(err.message, 'error');
+    }
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+async function logoutUser() {
+  try {
+    await fetch('/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  STATE.currentUser = null;
+  renderUserSession();
+  showToast('Logged out successfully.');
+  openModal('modal-auth-login');
+}
+
 /* ==================== DATA SYNC ==================== */
 async function refreshAllData(silent = false) {
   try {
@@ -215,6 +291,16 @@ async function refreshAllData(silent = false) {
       apiRequest('/audit'),
       apiRequest('/devices'),
     ]);
+
+    const isUnauth = [metricsRes, vehiclesRes, driversRes, deliveriesRes, auditRes, devicesRes].some(
+      (r) => r.status === 'rejected' && (r.reason?.status === 401 || r.reason?.code === 'UNAUTHORIZED')
+    );
+    if (isUnauth) {
+      STATE.currentUser = null;
+      renderUserSession();
+      openModal('modal-auth-login');
+      return;
+    }
 
     if (metricsRes.status === 'fulfilled' && metricsRes.value) {
       STATE.metrics = { ...STATE.metrics, ...metricsRes.value };
@@ -3682,6 +3768,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initNetworkInfoBanner();
   initGpsContextStatus();
   setupSSE();
+  await checkAuthSession();
   await refreshAllData(true);
 
   STATE.pollTimer = setInterval(() => {

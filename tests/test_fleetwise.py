@@ -783,7 +783,7 @@ def test_phase_b_race_lab_diagnostics(client: TestClient, temp_db: str):
 
 def test_phase_b_rbac_and_auth_flow(client: TestClient, temp_db: str):
     # Test login
-    login_res = client.post("/auth/login", json={"username": "dispatcher", "password": "dispatcher_placeholder_password"})
+    login_res = client.post("/auth/login", json={"username": "dispatcher", "password": "DispatcherSecurePass123!"})
     assert login_res.status_code == 200
     assert login_res.json()["user"]["role"] == "dispatcher"
 

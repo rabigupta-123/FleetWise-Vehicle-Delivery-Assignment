@@ -219,7 +219,7 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     r = client.post("/auth/login", json={"username": "dispatcher", "password": "wrongpassword"})
     assert r.status_code == 401
     # 200 Valid
-    r = client.post("/auth/login", json={"username": "dispatcher", "password": "dispatcher_placeholder_password"})
+    r = client.post("/auth/login", json={"username": "dispatcher", "password": "DispatcherSecurePass123!"})
     assert r.status_code == 200
     assert r.json()["user"]["username"] == "dispatcher"
 
@@ -419,6 +419,7 @@ def test_auth_enforcement_on_all_routes_when_require_auth_active(client: TestCli
         "/health",
         "/auth/login",
         "/probe",
+        "/probe/report",
         "/openapi.json",
         "/docs",
         "/redoc",

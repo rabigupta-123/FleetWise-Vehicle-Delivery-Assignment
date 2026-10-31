@@ -225,7 +225,7 @@ python scripts/run_dual_server.py
 ## 🧪 Test Suite & Quality Status
 
 <!-- BEGIN:TEST_COUNTS -->
-**70 Passed** / **70 Total** (100% pass rate)
+**77 Passed** / **77 Total** (100% pass rate)
 <!-- END:TEST_COUNTS -->
 
 ### Running the Complete Test & Quality Suite:
@@ -257,15 +257,15 @@ python scripts/update_readme.py --check
 ## ⚡ Concurrency & Performance Benchmark
 
 <!-- BEGIN:BENCHMARK -->
-> **Disclaimer:** Measured on a single developer machine with SQLite; real production throughput depends on network and database backend.
+> **Disclaimer:** 
 
 | Concurrency (Threads) | Requests | Success Rate | Wall Duration | Throughput (req/s) | p50 Latency | p95 Latency |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **1 Thread(s)** | 100 | 100.0% | 1.9702 s | 50.8 req/s | 18.35 ms | 31.98 ms |
-| **5 Thread(s)** | 100 | 100.0% | 1.9361 s | 51.7 req/s | 118.96 ms | 204.43 ms |
-| **10 Thread(s)** | 100 | 100.0% | 2.0645 s | 48.4 req/s | 257.61 ms | 425.87 ms |
-| **25 Thread(s)** | 100 | 100.0% | 2.3756 s | 42.1 req/s | 599.05 ms | 1213.4 ms |
-| **50 Thread(s)** | 100 | 100.0% | 15.264 s | 6.6 req/s | 1072.64 ms | 3065.63 ms |
+| **1 Thread(s)** | 100 | 100.0% | 1.5015 s | 66.6 req/s | 13.25 ms | 23.06 ms |
+| **5 Thread(s)** | 100 | 100.0% | 0.843 s | 118.6 req/s | 38.94 ms | 71.05 ms |
+| **10 Thread(s)** | 100 | 100.0% | 0.7942 s | 125.9 req/s | 78.98 ms | 133.6 ms |
+| **25 Thread(s)** | 100 | 100.0% | 0.7702 s | 129.8 req/s | 171.55 ms | 287.71 ms |
+| **50 Thread(s)** | 100 | 100.0% | 1.0744 s | 93.1 req/s | 425.09 ms | 677.51 ms |
 <!-- END:BENCHMARK -->
 
 ---
@@ -275,69 +275,69 @@ python scripts/update_readme.py --check
 The following routes are generated directly from the running FastAPI application:
 
 <!-- BEGIN:API_ROUTES -->
-| Method | Route Path | Description |
-|:---:|:---|:---|
-| `GET` | `/` | Operational endpoint |
-| `GET` | `/analytics/accuracy` | Calculates granular Telemetry Quality Scores across active tracking sessions. |
-| `GET` | `/analytics/anomalies` | Retrieves operational and kinematic anomalies detected across telemetry and events. |
-| `GET` | `/analytics/confidence` | Calculates Evidence Confidence Scores across device identity and active fleet assignments. |
-| `GET` | `/analytics/deliveries` | Comprehensive delivery completion and on-time performance breakdown. |
-| `GET` | `/analytics/drivers` | Driver utilization and individual performance metrics. |
-| `GET` | `/analytics/drivers/{driver_id}` | Detailed operational metrics and delivery performance for a single driver. |
-| `GET` | `/analytics/fleet` | Fleet utilization breakdown and operational performance per vehicle. |
-| `GET` | `/analytics/overview` | Executive operational overview combining fleet, driver, and delivery KPIs. |
-| `GET` | `/analytics/summary` | Operational endpoint |
-| `GET` | `/analytics/telemetry` | Aggregated telemetry volume, quality distribution, and kinematics statistics. |
-| `GET` | `/analytics/vehicles/{vehicle_id}` | Detailed operational metrics and telemetry stats for a single vehicle. |
-| `GET` | `/audit` | Operational endpoint |
-| `POST` | `/auth/login` | Operational endpoint |
-| `POST` | `/auth/logout` | Operational endpoint |
-| `GET` | `/auth/me` | Operational endpoint |
-| `GET` | `/deliveries` | Operational endpoint |
-| `POST` | `/deliveries` | Operational endpoint |
-| `POST` | `/deliveries/auto-assign` | Operational endpoint |
-| `GET` | `/deliveries/blocked` | Operational endpoint |
-| `GET` | `/deliveries/dispatch-next` | Operational endpoint |
-| `GET` | `/deliveries/routes` | Operational endpoint |
-| `POST` | `/deliveries/{delivery_id}/assign` | Atomically assign a vehicle and driver to a pending delivery. |
-| `GET` | `/deliveries/{delivery_id}/recommendations` | Operational endpoint |
-| `PATCH` | `/deliveries/{delivery_id}/status` | Operational endpoint |
-| `GET` | `/devices` | Operational endpoint |
-| `GET` | `/devices/probe-reports` | Retrieves list of captured device probe reports. |
-| `POST` | `/devices/register` | Operational endpoint |
-| `GET` | `/devices/{device_id}` | Operational endpoint |
-| `PATCH` | `/devices/{device_id}/rename` | Operational endpoint |
-| `POST` | `/devices/{device_id}/revoke` | Operational endpoint |
-| `GET` | `/devices/{device_id}/telemetry` | Operational endpoint |
-| `POST` | `/diagnostics/concurrency-test` | Executes N parallel assignment attempts against an ISOLATED temporary database |
-| `GET` | `/drivers` | Operational endpoint |
-| `POST` | `/drivers` | Operational endpoint |
-| `PATCH` | `/drivers/{driver_id}/phone` | Operational endpoint |
-| `POST` | `/drivers/{driver_id}/phone/request-verification` | Operational endpoint |
-| `POST` | `/drivers/{driver_id}/phone/verify` | Operational endpoint |
-| `PATCH` | `/drivers/{driver_id}/status` | Operational endpoint |
-| `GET` | `/events` | Operational endpoint |
-| `GET` | `/export/{entity}.csv` | Operational endpoint |
-| `GET` | `/health` | Operational endpoint |
-| `GET` | `/import/templates/{entity}.csv` | Operational endpoint |
-| `POST` | `/import/{entity}` | Operational endpoint |
-| `GET` | `/metrics` | Operational endpoint |
-| `GET` | `/network-info` | Operational endpoint |
-| `GET` | `/probe` | Operational endpoint |
-| `POST` | `/probe/report` | Stores client device capability and battery diagnostics probe report. |
-| `GET` | `/system/host-power` | Returns server host physical power telemetry (Win32 kernel GetSystemPowerStatus / psutil). |
-| `GET` | `/tracking/deliveries/{delivery_id}/latest` | Operational endpoint |
-| `GET` | `/tracking/drivers/{driver_id}/latest` | Operational endpoint |
-| `GET` | `/tracking/history` | Operational endpoint |
-| `POST` | `/tracking/location` | Operational endpoint |
-| `POST` | `/tracking/sessions/start` | Operational endpoint |
-| `POST` | `/tracking/sessions/stop` | Operational endpoint |
-| `POST` | `/tracking/sessions/{session_id}/consent` | Explicitly grants or revokes driver location tracking consent. |
-| `GET` | `/tracking/telemetry-graph` | Operational endpoint |
-| `GET` | `/tracking/vehicles/{vehicle_id}/latest` | Operational endpoint |
-| `GET` | `/vehicles` | Operational endpoint |
-| `POST` | `/vehicles` | Operational endpoint |
-| `PATCH` | `/vehicles/{vehicle_id}/status` | Operational endpoint |
+| Method | Route Path | Auth Required | Allowed Role(s) | Description |
+|:---:|:---|:---:|:---|:---|
+| `GET` | `/` | No | `Public` | Operational endpoint |
+| `GET` | `/analytics/accuracy` | Yes | `ops_lead` | Calculates granular Telemetry Quality Scores across active tracking sessions. |
+| `GET` | `/analytics/anomalies` | Yes | `ops_lead` | Retrieves operational and kinematic anomalies detected across telemetry and events. |
+| `GET` | `/analytics/confidence` | Yes | `ops_lead` | Calculates Evidence Confidence Scores across device identity and active fleet assignments. |
+| `GET` | `/analytics/deliveries` | Yes | `dispatcher, ops_lead` | Comprehensive delivery completion and on-time performance breakdown. |
+| `GET` | `/analytics/drivers` | Yes | `fleet_manager, ops_lead` | Driver utilization and individual performance metrics. |
+| `GET` | `/analytics/drivers/{driver_id}` | Yes | `fleet_manager, ops_lead` | Detailed operational metrics and delivery performance for a single driver. |
+| `GET` | `/analytics/fleet` | Yes | `ops_lead` | Fleet utilization breakdown and operational performance per vehicle. |
+| `GET` | `/analytics/overview` | Yes | `ops_lead` | Executive operational overview combining fleet, driver, and delivery KPIs. |
+| `GET` | `/analytics/summary` | Yes | `ops_lead` | Operational endpoint |
+| `GET` | `/analytics/telemetry` | Yes | `ops_lead` | Aggregated telemetry volume, quality distribution, and kinematics statistics. |
+| `GET` | `/analytics/vehicles/{vehicle_id}` | Yes | `fleet_manager, ops_lead` | Detailed operational metrics and telemetry stats for a single vehicle. |
+| `GET` | `/audit` | Yes | `ops_lead` | Operational endpoint |
+| `POST` | `/auth/login` | No | `Public` | Operational endpoint |
+| `POST` | `/auth/logout` | Yes | `Any Authenticated` | Operational endpoint |
+| `GET` | `/auth/me` | Yes | `Any Authenticated` | Operational endpoint |
+| `GET` | `/deliveries` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `POST` | `/deliveries` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `POST` | `/deliveries/auto-assign` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `GET` | `/deliveries/blocked` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `GET` | `/deliveries/dispatch-next` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `GET` | `/deliveries/routes` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `POST` | `/deliveries/{delivery_id}/assign` | Yes | `dispatcher, ops_lead` | Atomically assign a vehicle and driver to a pending delivery. |
+| `GET` | `/deliveries/{delivery_id}/recommendations` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `PATCH` | `/deliveries/{delivery_id}/status` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `GET` | `/devices` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/devices/probe-reports` | Yes | `fleet_manager, ops_lead` | Retrieves list of captured device probe reports. |
+| `POST` | `/devices/register` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/devices/{device_id}` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `PATCH` | `/devices/{device_id}/rename` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/devices/{device_id}/revoke` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/devices/{device_id}/telemetry` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/diagnostics/concurrency-test` | Yes | `ops_lead` | Executes N parallel assignment attempts against an ISOLATED temporary database |
+| `GET` | `/drivers` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/drivers` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `PATCH` | `/drivers/{driver_id}/phone` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/drivers/{driver_id}/phone/request-verification` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/drivers/{driver_id}/phone/verify` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `PATCH` | `/drivers/{driver_id}/status` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/events` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/export/{entity}.csv` | Yes | `ops_lead` | Operational endpoint |
+| `GET` | `/health` | No | `Public` | Operational endpoint |
+| `GET` | `/import/templates/{entity}.csv` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/import/{entity}` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/metrics` | Yes | `ops_lead` | Operational endpoint |
+| `GET` | `/network-info` | Yes | `ops_lead` | Operational endpoint |
+| `GET` | `/probe` | No | `Public` | Operational endpoint |
+| `POST` | `/probe/report` | No | `Public` | Stores client device capability and battery diagnostics probe report. |
+| `GET` | `/system/host-power` | Yes | `ops_lead` | Returns server host physical power telemetry (Win32 kernel GetSystemPowerStatus / psutil). |
+| `GET` | `/tracking/deliveries/{delivery_id}/latest` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `GET` | `/tracking/drivers/{driver_id}/latest` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/tracking/history` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/tracking/location` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/tracking/sessions/start` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/tracking/sessions/stop` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/tracking/sessions/{session_id}/consent` | Yes | `dispatcher, fleet_manager, ops_lead` | Explicitly grants or revokes driver location tracking consent. |
+| `GET` | `/tracking/telemetry-graph` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/tracking/vehicles/{vehicle_id}/latest` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `GET` | `/vehicles` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `POST` | `/vehicles` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
+| `PATCH` | `/vehicles/{vehicle_id}/status` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 <!-- END:API_ROUTES -->
 
 ---

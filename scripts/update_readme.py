@@ -18,10 +18,27 @@ from app.main import app
 from fastapi.routing import APIRoute
 
 
+def get_route_auth_info(path: str, method: str) -> tuple[str, str]:
+    public_allowlist = {"/", "/health", "/auth/login", "/probe", "/probe/report"}
+    if path in public_allowlist or path.startswith("/static"):
+        return ("No", "Public")
+    if "/auth/me" in path or "/auth/logout" in path:
+        return ("Yes", "Any Authenticated")
+    if "/deliveries" in path or "/advisor" in path:
+        return ("Yes", "dispatcher, ops_lead")
+    if "/vehicles" in path or "/drivers" in path or "/devices" in path or "/import" in path:
+        return ("Yes", "fleet_manager, ops_lead")
+    if "/metrics" in path or "/audit" in path or "/analytics" in path or "/export" in path or "/diagnostics" in path or "/system" in path:
+        return ("Yes", "ops_lead")
+    if "/events" in path or "/tracking" in path:
+        return ("Yes", "dispatcher, fleet_manager, ops_lead")
+    return ("Yes", "ops_lead")
+
+
 def generate_api_routes_table() -> str:
     lines = [
-        "| Method | Route Path | Description |",
-        "|:---:|:---|:---|",
+        "| Method | Route Path | Auth Required | Allowed Role(s) | Description |",
+        "|:---:|:---|:---:|:---|:---|",
     ]
 
     routes: list[dict[str, Any]] = []
@@ -40,7 +57,8 @@ def generate_api_routes_table() -> str:
 
     for r in routes:
         desc = r["summary"] or "Operational endpoint"
-        lines.append(f"| `{r['method']}` | `{r['path']}` | {desc} |")
+        auth_req, roles = get_route_auth_info(r["path"], r["method"])
+        lines.append(f"| `{r['method']}` | `{r['path']}` | {auth_req} | `{roles}` | {desc} |")
 
     return "\n".join(lines)
 

@@ -14,6 +14,7 @@ FORBIDDEN_PATTERNS = [
     (re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"), "Private key block detected"),
     (re.compile(r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36}"), "GitHub token detected"),
     (re.compile(r"ey[A-Za-z0-9_-]{10,}\.ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), "Raw JWT token detected"),
+    (re.compile(r"place" + r"holder_password", re.IGNORECASE), "Placeholder password detected"),
 ]
 
 FORBIDDEN_EXTENSIONS = [
@@ -53,6 +54,8 @@ def check_git_tracked_files() -> list[str]:
             violations.append(f"Tracked active environment file: {rel_path}")
 
         # 2. Check content for sensitive patterns
+        if rel_path.replace("\\", "/") == "scripts/check_secrets.py":
+            continue
         if p.exists() and p.is_file() and p.stat().st_size < 2_000_000:
             try:
                 text = p.read_text(encoding="utf-8", errors="ignore")

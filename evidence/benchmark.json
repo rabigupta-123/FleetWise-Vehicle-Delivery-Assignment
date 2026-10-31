@@ -1,62 +1,92 @@
 {
   "title": "FleetWise Concurrency & Latency Benchmark",
-  "timestamp": "2026-10-31T12:08:52Z",
-  "disclaimer": "Measured on a single developer machine with SQLite; real production throughput depends on network and database backend.",
+  "timestamp": "2026-10-31T15:35:55Z",
+  "sqlite_architecture_notes": "SQLite operates with single-writer WAL mode. Under 50 concurrent threads, read operations scale without blocking readers, while write operations serialize through BEGIN IMMEDIATE. Zero database corruptions or 5xx unhandled lock errors occurred.",
   "results": [
     {
       "threads": 1,
       "total_requests": 100,
-      "successful_requests": 100,
+      "status_breakdown": {
+        "2xx": 100,
+        "409": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "db_locked": 0
+      },
       "success_rate_pct": 100.0,
-      "wall_duration_s": 1.9702,
-      "requests_per_second": 50.8,
-      "latency_p50_ms": 18.35,
-      "latency_p95_ms": 31.98,
-      "latency_p99_ms": 85.78
+      "wall_duration_s": 1.5015,
+      "requests_per_second": 66.6,
+      "latency_p50_ms": 13.25,
+      "latency_p95_ms": 23.06,
+      "latency_p99_ms": 95.03
     },
     {
       "threads": 5,
       "total_requests": 100,
-      "successful_requests": 100,
+      "status_breakdown": {
+        "2xx": 100,
+        "409": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "db_locked": 0
+      },
       "success_rate_pct": 100.0,
-      "wall_duration_s": 1.9361,
-      "requests_per_second": 51.7,
-      "latency_p50_ms": 118.96,
-      "latency_p95_ms": 204.43,
-      "latency_p99_ms": 290.73
+      "wall_duration_s": 0.843,
+      "requests_per_second": 118.6,
+      "latency_p50_ms": 38.94,
+      "latency_p95_ms": 71.05,
+      "latency_p99_ms": 88.35
     },
     {
       "threads": 10,
       "total_requests": 100,
-      "successful_requests": 100,
+      "status_breakdown": {
+        "2xx": 100,
+        "409": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "db_locked": 0
+      },
       "success_rate_pct": 100.0,
-      "wall_duration_s": 2.0645,
-      "requests_per_second": 48.4,
-      "latency_p50_ms": 257.61,
-      "latency_p95_ms": 425.87,
-      "latency_p99_ms": 449.37
+      "wall_duration_s": 0.7942,
+      "requests_per_second": 125.9,
+      "latency_p50_ms": 78.98,
+      "latency_p95_ms": 133.6,
+      "latency_p99_ms": 157.63
     },
     {
       "threads": 25,
       "total_requests": 100,
-      "successful_requests": 100,
+      "status_breakdown": {
+        "2xx": 100,
+        "409": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "db_locked": 0
+      },
       "success_rate_pct": 100.0,
-      "wall_duration_s": 2.3756,
-      "requests_per_second": 42.1,
-      "latency_p50_ms": 599.05,
-      "latency_p95_ms": 1213.4,
-      "latency_p99_ms": 1359.38
+      "wall_duration_s": 0.7702,
+      "requests_per_second": 129.8,
+      "latency_p50_ms": 171.55,
+      "latency_p95_ms": 287.71,
+      "latency_p99_ms": 335.62
     },
     {
       "threads": 50,
       "total_requests": 100,
-      "successful_requests": 100,
+      "status_breakdown": {
+        "2xx": 100,
+        "409": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "db_locked": 0
+      },
       "success_rate_pct": 100.0,
-      "wall_duration_s": 15.264,
-      "requests_per_second": 6.6,
-      "latency_p50_ms": 1072.64,
-      "latency_p95_ms": 3065.63,
-      "latency_p99_ms": 15088.46
+      "wall_duration_s": 1.0744,
+      "requests_per_second": 93.1,
+      "latency_p50_ms": 425.09,
+      "latency_p95_ms": 677.51,
+      "latency_p99_ms": 718.94
     }
   ]
 }

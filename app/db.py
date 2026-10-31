@@ -143,7 +143,8 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('dispatcher', 'fleet_manager', 'ops_lead')),
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    must_change_password INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tracking_sessions (
@@ -206,7 +207,6 @@ def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     path = db_path or get_db_path()
     conn = sqlite3.connect(path, timeout=30.0, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA busy_timeout = 30000;")
     return conn
@@ -215,6 +215,7 @@ def get_connection(db_path: str | None = None) -> sqlite3.Connection:
 def init_db(db_path: str | None = None) -> None:
     conn = get_connection(db_path)
     try:
+        conn.execute("PRAGMA journal_mode = WAL;")
         conn.executescript(SCHEMA_SQL)
         # Migrate existing tables if columns are missing
         _migrate_columns(conn)
@@ -228,6 +229,9 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
         existing_cols = {row["name"] for row in info}
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type};")
+
+    # Users
+    add_col_if_missing("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0")
 
     # Devices
     add_col_if_missing("devices", "device_category", "TEXT NULL")
