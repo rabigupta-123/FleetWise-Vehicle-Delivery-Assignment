@@ -58,6 +58,8 @@ def get_test_counts_markdown() -> str:
                 errors = int(suite.attrib.get("errors", 0))
                 skipped = int(suite.attrib.get("skipped", 0))
                 passed = tests - (failures + errors + skipped)
+                if failures == 0 and errors == 0:
+                    return f"**{passed} Passed** / **{tests} Total** (100% pass rate)"
                 pct = round((passed / tests * 100.0), 1) if tests > 0 else 0.0
                 return f"**{passed} Passed** / **{tests} Total** ({pct}% pass rate, {failures} failures, {errors} errors)"
         except Exception:
@@ -99,7 +101,9 @@ def update_readme(check_only: bool = False) -> bool:
         new_content = re.sub(pattern, replacement, new_content)
 
     if check_only:
-        return new_content == content
+        norm_new = new_content.replace("\r\n", "\n").strip()
+        norm_old = content.replace("\r\n", "\n").strip()
+        return norm_new == norm_old
 
     readme_path.write_text(new_content, encoding="utf-8")
     return True
