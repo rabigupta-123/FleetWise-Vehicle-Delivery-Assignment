@@ -7,6 +7,7 @@ import ipaddress
 import os
 import socket
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -40,7 +41,7 @@ def generate_certs(cert_dir="certs", cert_name="cert.pem", key_name="key.pem"):
     )
 
     # 2. Build SAN entries
-    san_entries = [
+    san_entries: list[x509.GeneralName] = [
         x509.DNSName("localhost"),
         x509.DNSName("fleetwise.local"),
     ]
@@ -99,7 +100,7 @@ def generate_certs(cert_dir="certs", cert_name="cert.pem", key_name="key.pem"):
     return cert_path, key_path
 
 
-def inspect_cert(cert_path="certs/cert.pem"):
+def inspect_cert(cert_path: str = "certs/cert.pem") -> dict[str, Any]:
     """
     Parses and verifies an existing X.509 certificate.
     Returns expiration, days remaining, and Subject Alternative Names.
@@ -123,11 +124,12 @@ def inspect_cert(cert_path="certs/cert.pem"):
         san_dns = []
         try:
             ext = cert.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-            for name in ext.value:
-                if isinstance(name, x509.IPAddress):
-                    san_ips.append(str(name.value))
-                elif isinstance(name, x509.DNSName):
-                    san_dns.append(name.value)
+            if isinstance(ext.value, x509.SubjectAlternativeName):
+                for name in ext.value:
+                    if isinstance(name, x509.IPAddress):
+                        san_ips.append(str(name.value))
+                    elif isinstance(name, x509.DNSName):
+                        san_dns.append(name.value)
         except Exception:
             pass
 
@@ -162,11 +164,12 @@ def ensure_valid_certs(cert_dir="certs", cert_name="cert.pem", key_name="key.pem
     if not inspection.get("exists") or not os.path.exists(key_path):
         needs_regen = True
         regen_reason = "Certificate or private key file missing"
-    elif not inspection.get("valid") or inspection.get("days_remaining", 0) < 7:
+    elif not inspection.get("valid") or int(inspection.get("days_remaining") or 0) < 7:
         needs_regen = True
         regen_reason = f"Certificate expired or expiring soon ({inspection.get('days_remaining')} days remaining)"
     else:
-        san_ips_in_cert = set(inspection.get("san_ips", []))
+        raw_san = inspection.get("san_ips")
+        san_ips_in_cert = set(raw_san) if isinstance(raw_san, (list, tuple, set)) else set()
         missing_ips = current_lan_ips - san_ips_in_cert
         if missing_ips:
             needs_regen = True

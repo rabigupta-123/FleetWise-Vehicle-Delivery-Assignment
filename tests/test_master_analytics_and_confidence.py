@@ -2,7 +2,6 @@
 FleetWise Automated Tests — Master Security Hardening, Accuracy Engine,
 Confidence Engine, Deep Analytics, and SOC Endpoints (Phase Ten).
 """
-import pytest
 from starlette.testclient import TestClient
 
 from app.analytics.accuracy_engine import (
@@ -25,24 +24,24 @@ from app.analytics.confidence_engine import (
 def test_accuracy_engine_gps_score_calculations():
     # 5m: ~90.5
     s5, f5 = calculate_gps_quality_score(5.0)
-    assert round(s5, 1) == 90.5
+    assert s5 is not None and round(s5, 1) == 90.5
     assert "high_precision_fix" in f5
 
     # 10m: ~81.9
     s10, _ = calculate_gps_quality_score(10.0)
-    assert round(s10, 1) == 81.9
+    assert s10 is not None and round(s10, 1) == 81.9
 
     # 25m: ~60.7
     s25, _ = calculate_gps_quality_score(25.0)
-    assert 60.5 <= s25 <= 60.8
+    assert s25 is not None and 60.5 <= s25 <= 60.8
 
     # 50m: ~36.8
     s50, _ = calculate_gps_quality_score(50.0)
-    assert round(s50, 1) == 36.8
+    assert s50 is not None and round(s50, 1) == 36.8
 
     # 100m: ~13.5
     s100, f100 = calculate_gps_quality_score(100.0)
-    assert round(s100, 1) == 13.5
+    assert s100 is not None and round(s100, 1) == 13.5
 
     # Boundary: Missing / None -> returns null
     s_none, f_none = calculate_gps_quality_score(None)
@@ -67,12 +66,12 @@ def test_accuracy_engine_freshness_score():
 
     # 120s decay (tau = 120s) -> 100 * exp(-1) = 36.79
     s_120, _, age_120 = calculate_freshness_score("2026-10-30T12:00:00Z", current_time_iso="2026-10-30T12:02:00Z")
-    assert round(s_120, 1) == 36.8
+    assert s_120 is not None and round(s_120, 1) == 36.8
     assert age_120 == 120.0
 
     # Future timestamp (clock skew 30s ahead): penalized, cannot receive 100
     s_fut, f_fut, age_fut = calculate_freshness_score("2026-10-30T12:00:30Z", current_time_iso="2026-10-30T12:00:00Z")
-    assert s_fut < 100.0
+    assert s_fut is not None and s_fut < 100.0
     assert "mild_future_clock_skew" in f_fut
 
     # Severe future timestamp (>5m): score = 0.0

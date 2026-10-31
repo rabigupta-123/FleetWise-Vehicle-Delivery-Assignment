@@ -1,4 +1,5 @@
-import math
+from datetime import UTC
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -57,8 +58,8 @@ def test_telemetry_step_kinematics_and_jump_detection():
 
 def test_freshness_status_thresholds():
     # Fresh fix (< 90s)
-    from datetime import datetime, timezone, timedelta
-    now_utc = datetime.now(timezone.utc)
+    from datetime import datetime, timedelta
+    now_utc = datetime.now(UTC)
 
     fresh_ts = (now_utc - timedelta(seconds=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
     res_fresh = compute_freshness_status(fresh_ts)

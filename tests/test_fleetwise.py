@@ -2,6 +2,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -827,3 +828,31 @@ def test_phase_b_analytics_and_routes(client: TestClient, temp_db: str):
         passed=True,
         evidence_path="evidence/phase_b_analytics.json",
     )
+
+
+def test_audit_log_triggers_prevent_update_and_delete(client: TestClient, temp_db: str):
+    import sqlite3
+
+    from app.db import get_connection
+
+    conn = get_connection(temp_db)
+    try:
+        # Create a delivery to generate an audit_log entry
+        res = client.post("/vehicles", json={"vehicle_id": "V-AUDIT-1", "registration_no": "KA-AUD-01", "type": "Van", "capacity": 1000})
+        assert res.status_code == 201
+
+        row = conn.execute("SELECT id FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
+        assert row is not None
+        audit_id = row[0]
+
+        # 1. Prohibit UPDATE on audit_log
+        with pytest.raises(sqlite3.DatabaseError) as exc_update:
+            conn.execute("UPDATE audit_log SET actor = 'tampered' WHERE id = ?", (audit_id,))
+        assert "audit_log is append-only: UPDATE is forbidden" in str(exc_update.value)
+
+        # 2. Prohibit DELETE on audit_log
+        with pytest.raises(sqlite3.DatabaseError) as exc_delete:
+            conn.execute("DELETE FROM audit_log WHERE id = ?", (audit_id,))
+        assert "audit_log is append-only: DELETE is forbidden" in str(exc_delete.value)
+    finally:
+        conn.close()

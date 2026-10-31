@@ -1,4 +1,3 @@
-import pytest
 from starlette.testclient import TestClient
 
 
@@ -393,7 +392,7 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     assert r.status_code == 404
 
     # 43. GET /tracking/history -> 200
-    r = client.get(f"/tracking/history?vehicle_id=V-AUDIT-1")
+    r = client.get("/tracking/history?vehicle_id=V-AUDIT-1")
     assert r.status_code == 200
     assert isinstance(r.json()["trail"], list)
 

@@ -1,6 +1,7 @@
-import os
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -62,7 +63,7 @@ def temp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture()
-def client(temp_db: str) -> TestClient:
+def client(temp_db: str) -> Generator[TestClient, None, None]:
     with TestClient(app) as c:
         yield c
 

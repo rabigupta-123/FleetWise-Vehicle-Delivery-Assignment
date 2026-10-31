@@ -2,7 +2,8 @@
 FleetWise — Automated Tests for Device Intelligence, Secure Mobile GPS, Telemetry Ingestion,
 Device Ownership Authorization, Duplicate Prevention, and Rate Limiting (Phase 10).
 """
-import pytest
+from datetime import UTC
+
 from fastapi.testclient import TestClient
 
 
@@ -325,8 +326,8 @@ def test_revoked_device_cannot_reregister_or_send_telemetry(client: TestClient, 
 
 
 def test_out_of_order_stale_and_jump_gps_anomalies(client: TestClient, temp_db: str):
-    from datetime import datetime, timezone, timedelta
-    now = datetime.now(timezone.utc)
+    from datetime import datetime, timedelta
+    now = datetime.now(UTC)
     t0_str = now.isoformat()
     t1_str = (now + timedelta(seconds=2)).isoformat()
     t_ooo_str = (now + timedelta(seconds=1)).isoformat()  # Out of order compared to t1
@@ -436,6 +437,66 @@ def test_tunnel_external_access_authentication_guard(client: TestClient, temp_db
         "capacity": 1000,
     }, headers=auth_headers)
     assert res_auth.status_code == 201
+
+
+def test_battery_truthfulness_unit_states_node():
+    """Executes the unit tests for all 4 battery states with mocked BatteryManager under Node.js."""
+    import subprocess
+    proc = subprocess.run(["node", "--test", "tests/test_battery_states.test.js"], capture_output=True, text=True)
+    assert proc.returncode == 0, f"Node battery tests failed:\n{proc.stdout}\n{proc.stderr}"
+    assert "fail 0" in proc.stdout
+    assert "pass 6" in proc.stdout
+
+
+def test_system_host_power_endpoint(client: TestClient):
+    """Verifies that /system/host-power returns server host physical telemetry with explicit role isolation."""
+    res = client.get("/system/host-power")
+    assert res.status_code == 200
+    data = res.json()
+    assert "supported" in data
+    assert data["role"] == "server_host_power"
+    assert "Server host power" in data["label"]
+
+
+def test_probe_endpoints_and_recording(client: TestClient, temp_db: str):
+    """Verifies that /probe serves HTML and /probe/report records client diagnostics into device_probe_reports."""
+    # 1. GET /probe
+    res_probe = client.get("/probe")
+    assert res_probe.status_code == 200
+    assert "BATTERY DIAGNOSTICS" in res_probe.text
+    assert "TRUTHFULNESS COMPLIANT" in res_probe.text
+
+    # 2. POST /probe/report
+    probe_payload = {
+        "device_id": "DEV-PROBE-01",
+        "driver_id": "DR-001",
+        "battery": {
+            "status": "measured_suspect",
+            "reason": "values equal the API's defaults; the browser may not be reading a battery",
+            "raw": {
+                "level": 1.0,
+                "charging": True,
+                "chargingTime": 0,
+                "dischargingTime": "Infinity",
+            },
+        },
+        "browser": "Chrome 156.0.0.0",
+        "isSecureContext": True,
+    }
+    res_post = client.post("/probe/report", json=probe_payload)
+    assert res_post.status_code == 200
+    report_data = res_post.json()
+    assert report_data["status"] == "ok"
+    assert report_data["report_id"].startswith("prb_")
+
+    # 3. GET /devices/probe-reports
+    res_list = client.get("/devices/probe-reports")
+    assert res_list.status_code == 200
+    reports = res_list.json()
+    assert len(reports) >= 1
+    assert reports[0]["report_id"] == report_data["report_id"]
+    assert reports[0]["device_id"] == "DEV-PROBE-01"
+
 
 
 
