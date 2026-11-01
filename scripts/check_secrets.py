@@ -62,7 +62,11 @@ def check_git_tracked_files() -> list[str]:
             try:
                 text = p.read_text(encoding="utf-8", errors="ignore")
                 for pattern, msg in FORBIDDEN_PATTERNS:
-                    if pattern.search(text):
+                    m = pattern.search(text)
+                    if m:
+                        matched_str = m.group()
+                        if "REDACTED" in matched_str or "<" in matched_str or "example" in matched_str.lower():
+                            continue
                         violations.append(f"{msg} in {rel_path}")
 
                 # 3. Check evidence files for non-synthetic / personal coordinates

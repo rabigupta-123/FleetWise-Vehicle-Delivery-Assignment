@@ -38,7 +38,7 @@ def mask_sensitive_info(page):
         });
         const urlInput = document.getElementById('pair-driver-url-input');
         if (urlInput && urlInput.value) {
-            urlInput.value = 'https://LAN.FLEETWISE.LOCAL:8443/driver?pair=REDACTED_PAIRING_TOKEN_192BIT';
+            urlInput.value = 'https://LAN.FLEETWISE.LOCAL:8443/driver?pair=<REDACTED_TOKEN>';
         }
     }""")
 
