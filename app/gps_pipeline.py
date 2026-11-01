@@ -28,6 +28,7 @@ from app.config import (
     MAHALANOBIS_OUTLIER_THRESHOLD,
     ROUTE_FACTOR,
     STATIONARY_SPEED_THRESHOLD_MPS,
+    get_accuracy_sigma_divisor,
 )
 
 EARTH_RADIUS_M = 6371000.0
@@ -524,3 +525,38 @@ def get_accuracy_quality_label(accuracy_m: float | None) -> str:
     if accuracy_m <= 100.0:
         return "Poor"
     return "Very poor"
+
+
+def calculate_accuracy_score(accuracy_m: float | None) -> float | None:
+    """
+    Computes separate GPS accuracy quality score S in [0, 100]:
+    S = 100 * exp(-accuracy_m / 50.0), clamped to [0.0, 100.0].
+    Returns None if accuracy_m is None or not finite or negative.
+    """
+    if accuracy_m is None or not math.isfinite(accuracy_m) or accuracy_m < 0:
+        return None
+    s = 100.0 * math.exp(-accuracy_m / 50.0)
+    return round(max(0.0, min(100.0, s)), 1)
+
+
+def calculate_sigma_pos(accuracy_m: float | None, p: float | None = None) -> float | None:
+    """
+    Converts reported horizontal accuracy radius to 1-sigma standard deviation:
+    sigma = accuracy / sqrt(-2 * ln(1 - p))
+    where p is the radius-confidence assumption (default ACCURACY_CONFIDENCE_P = 0.68).
+    For p = 0.68, divisor = sqrt(-2 * ln(0.32)) = 1.509592...
+    """
+    if accuracy_m is None or not math.isfinite(accuracy_m) or accuracy_m <= 0:
+        return None
+    divisor = get_accuracy_sigma_divisor(p)
+    return accuracy_m / divisor
+
+
+def calculate_95pct_radius(sigma_pos: float | None) -> float | None:
+    """
+    Computes the 95% confidence radius from sigma:
+    r_95 = sigma * sqrt(-2 * ln(0.05)) = 2.4477469... * sigma
+    """
+    if sigma_pos is None or not math.isfinite(sigma_pos) or sigma_pos <= 0:
+        return None
+    return round(sigma_pos * 2.4477469, 1)

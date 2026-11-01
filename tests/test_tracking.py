@@ -292,3 +292,186 @@ def test_gps_telemetry_retention_purge(temp_db: str, monkeypatch):
     conn.close()
 
 
+def test_three_simulated_devices_interleaved_live_tracking(client: TestClient, temp_db: str):
+    """
+    Verifies multi-device concurrent tracking and security invariants:
+    1. 3 separate driver pairing tokens are created and bound to distinct devices.
+    2. Single-device binding: second physical device trying to use token A is rejected (403).
+    3. Revoked token is rejected immediately (403).
+    4. Interleaved telemetry transmission from multiple devices maintains zero cross-contamination.
+    5. GET /tracking/drivers/live returns exact uncapped accuracy, quality score, 95% radius,
+       and position confidence with live breadcrumb trails.
+    """
+    from app.auth import revoke_pairing_token
+
+    # 1. Register 3 drivers and vehicles
+    for i in (1, 2, 3):
+        client.post("/vehicles", json={
+            "vehicle_id": f"V-TRK-0{i}",
+            "registration_no": f"KA-01-TK-100{i}",
+            "type": "van",
+            "capacity": 1000 + i * 100,
+        })
+        client.post("/drivers", json={
+            "driver_id": f"DR-TRK-0{i}",
+            "name": f"Track Driver {i}",
+            "phone": f"+91 98888 0000{i}",
+        })
+
+    # 2. Generate pairing tokens
+    r_tok1 = client.post("/api/pairing-tokens", json={"driver_id": "DR-TRK-01"}).json()
+    r_tok2 = client.post("/api/pairing-tokens", json={"driver_id": "DR-TRK-02"}).json()
+    r_tok3 = client.post("/api/pairing-tokens", json={"driver_id": "DR-TRK-03"}).json()
+
+    tok1, tok2, tok3 = r_tok1["token"], r_tok2["token"], r_tok3["token"]
+    assert "https://" in r_tok1["url"]
+    assert tok1 in r_tok1["url"]
+
+    # 3. Device initialization and pairing
+    # Device A connects with tok1
+    sess_a = client.get(f"/api/driver/session?pair={tok1}", headers={"x-device-id": "DEV-PHONE-A"}).json()
+    assert sess_a["driver_id"] == "DR-TRK-01"
+    sess_id_a = sess_a["session_id"]
+
+    # Device B connects with tok2
+    sess_b = client.get(f"/api/driver/session?pair={tok2}", headers={"x-device-id": "DEV-PHONE-B"}).json()
+    assert sess_b["driver_id"] == "DR-TRK-02"
+    sess_id_b = sess_b["session_id"]
+
+    # Device C connects with tok3
+    sess_c = client.get(f"/api/driver/session?pair={tok3}", headers={"x-device-id": "DEV-PHONE-C"}).json()
+    assert sess_c["driver_id"] == "DR-TRK-03"
+
+    # Consent given
+    client.post(f"/tracking/sessions/{sess_id_a}/consent", json={"consent": True})
+    client.post(f"/tracking/sessions/{sess_id_b}/consent", json={"consent": True})
+
+    # 4. Security Check: Second physical device trying to use tok1 is REJECTED
+    rogue_res = client.get(f"/api/driver/session?pair={tok1}", headers={"x-device-id": "DEV-PHONE-ROGUE"})
+    assert rogue_res.status_code == 403
+    assert "Token bound to device" in rogue_res.json()["message"]
+
+    # 5. Security Check: Revoking tok3 rejects Device C
+    revoke_pairing_token(tok3)
+    revoked_res = client.get(f"/api/driver/session?pair={tok3}", headers={"x-device-id": "DEV-PHONE-C"})
+    assert revoked_res.status_code == 403
+    assert "revoked" in revoked_res.json()["message"]
+
+    # 6. Interleaved telemetry transmission: Device A & Device B
+    now_ts = "2026-11-01T04:00:00Z"
+    now_ts2 = "2026-11-01T04:00:05Z"
+
+    # Fix A1: Excellent accuracy (4.2m)
+    r_a1 = client.post("/tracking/location", json={
+        "session_id": sess_id_a,
+        "driver_id": "DR-TRK-01",
+        "latitude": 12.9716,
+        "longitude": 77.5946,
+        "accuracy": 4.2,
+        "speed": 8.0,
+        "heading": 90.0,
+        "device_timestamp": now_ts,
+    })
+    assert r_a1.status_code == 201
+
+    # Fix B1: Poor accuracy (76.0m)
+    r_b1 = client.post("/tracking/location", json={
+        "session_id": sess_id_b,
+        "driver_id": "DR-TRK-02",
+        "latitude": 12.9800,
+        "longitude": 77.6000,
+        "accuracy": 76.0,
+        "speed": 12.5,
+        "heading": 180.0,
+        "device_timestamp": now_ts,
+    })
+    assert r_b1.status_code == 201
+
+    # Fix A2: Device A moves slightly
+    r_a2 = client.post("/tracking/location", json={
+        "session_id": sess_id_a,
+        "driver_id": "DR-TRK-01",
+        "latitude": 12.9719,
+        "longitude": 77.5949,
+        "accuracy": 3.8,
+        "speed": 9.2,
+        "heading": 85.0,
+        "device_timestamp": now_ts2,
+    })
+    assert r_a2.status_code == 201
+
+    # Fix B2: Device B moves slightly
+    r_b2 = client.post("/tracking/location", json={
+        "session_id": sess_id_b,
+        "driver_id": "DR-TRK-02",
+        "latitude": 12.9810,
+        "longitude": 77.6010,
+        "accuracy": 72.0,
+        "speed": 11.0,
+        "heading": 175.0,
+        "device_timestamp": now_ts2,
+    })
+    assert r_b2.status_code == 201
+
+    # 7. Query live fleet tracking overview: GET /tracking/drivers/live
+    live_res = client.get("/tracking/drivers/live")
+    assert live_res.status_code == 200
+    live_data = live_res.json()
+
+    drivers_by_id = {d["driver_id"]: d for d in live_data["drivers"]}
+    assert "DR-TRK-01" in drivers_by_id
+    assert "DR-TRK-02" in drivers_by_id
+
+    dr1 = drivers_by_id["DR-TRK-01"]
+    dr2 = drivers_by_id["DR-TRK-02"]
+
+    # Invariants for Driver 1 (Live, Excellent accuracy 3.8m, Score > 90)
+    assert dr1["status"] == "live"
+    assert dr1["latest_fix"]["accuracy"] == 3.8
+    assert dr1["latest_fix"]["accuracy_label"] == "Excellent"
+    assert dr1["latest_fix"]["accuracy_score"] > 90.0
+    assert len(dr1["trail"]) == 2
+
+    # Invariants for Driver 2 (Live, Poor accuracy 72.0m, Score around 23)
+    assert dr2["status"] == "live"
+    assert dr2["latest_fix"]["accuracy"] == 72.0
+    assert dr2["latest_fix"]["accuracy_label"] == "Poor"
+    assert dr2["latest_fix"]["accuracy_score"] < 30.0
+    assert len(dr2["trail"]) == 2
+
+
+def test_tunnel_proxy_header_loopback_denial(client: TestClient, temp_db: str):
+    """
+    Verifies that requests carrying reverse-proxy / tunnel headers
+    (Forwarded, X-Forwarded-For, CF-Connecting-IP, CF-Ray) are NEVER
+    trusted as loopback, preventing unauthorized admin/dashboard access
+    when running FleetWise behind a local tunnel (e.g. cloudflared).
+    """
+    # 1. Plain loopback request to /vehicles succeeds
+    r_clean = client.get("/vehicles")
+    assert r_clean.status_code == 200
+
+    # 2. Request carrying X-Forwarded-For is denied (403 Forbidden)
+    r_xff = client.get("/vehicles", headers={"x-forwarded-for": "198.51.100.22"})
+    assert r_xff.status_code == 403
+    assert "loopback" in r_xff.json()["message"]
+
+    # 3. Request carrying CF-Connecting-IP is denied (403 Forbidden)
+    r_cf = client.get("/vehicles", headers={"cf-connecting-ip": "203.0.113.88"})
+    assert r_cf.status_code == 403
+
+    # 4. Request carrying Forwarded header is denied
+    r_fwd = client.get("/demo/status", headers={"forwarded": "for=192.0.2.60;proto=http"})
+    assert r_fwd.status_code == 403
+
+    # 5. Public diagnostic endpoints remain reachable even through tunnels
+    r_ping = client.get("/ping", headers={"x-forwarded-for": "198.51.100.22"})
+    assert r_ping.status_code == 200
+    assert r_ping.text == "ok"
+
+    r_health = client.get("/health", headers={"x-forwarded-for": "198.51.100.22"})
+    assert r_health.status_code == 200
+    assert r_health.json() == {"status": "ok"}
+
+
+

@@ -179,12 +179,21 @@ async def security_headers_middleware(request: Request, call_next):
 async def network_access_middleware(request: Request, call_next):
     path = request.url.path
 
-    # Public static assets, health check, and diagnostic probe
-    if path == "/health" or path.startswith("/static") or path == "/probe" or path.startswith("/probe"):
+    # Public static assets, health check, ping pre-flight, and diagnostic probe
+    if path in ("/health", "/ping") or path.startswith("/static") or path == "/probe" or path.startswith("/probe"):
         return await call_next(request)
 
-    is_loopback = is_loopback_client(request)
-    share_lan = is_share_lan_active()
+    # Tunnel / reverse proxy safety check:
+    # Any request carrying proxy headers (Forwarded, X-Forwarded-For, CF-Connecting-IP, CF-Ray)
+    # is treated as remote external traffic. Loopback is NOT trusted for such requests to protect
+    # the administrative dashboard when running behind a local tunnel (e.g. cloudflared).
+    has_proxy_header = any(
+        bool(request.headers.get(h))
+        for h in ("forwarded", "x-forwarded-for", "cf-connecting-ip", "cf-ray")
+    )
+
+    is_loopback = is_loopback_client(request) and not has_proxy_header
+    share_lan = is_share_lan_active() and not has_proxy_header
 
     # API docs authorization: strictly loopback only
     if path in ("/docs", "/redoc", "/openapi.json"):
@@ -199,8 +208,13 @@ async def network_access_middleware(request: Request, call_next):
     if is_loopback or share_lan:
         return await call_next(request)
 
-    # Otherwise (remote LAN client without --share): check if path is an authorized phone route
-    is_phone_route = path.startswith("/driver") or path.startswith("/probe") or path.startswith("/tracking")
+    # Otherwise (remote LAN client or tunnel client): check if path is an authorized phone route
+    is_phone_route = (
+        path.startswith("/driver")
+        or path.startswith("/api/driver")
+        or path.startswith("/probe")
+        or path.startswith("/tracking")
+    )
     if is_phone_route:
         # Public probe diagnostic
         if path == "/probe" and request.method == "GET":
@@ -347,7 +361,122 @@ async def create_pairing_token_endpoint(request: Request):
     except Exception:
         pass
     token = generate_pairing_token(driver_id=driver_id)
-    return {"token": token, "driver_id": driver_id}
+
+    driver_name = None
+    if driver_id:
+        conn = get_connection()
+        try:
+            drv = conn.execute("SELECT name FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone()
+            if drv:
+                driver_name = drv["name"]
+        finally:
+            conn.close()
+
+    from scripts.run_dual_server import detect_primary_lan_ip
+    lan_ip = detect_primary_lan_ip()
+    phone_url = f"https://{lan_ip}:8443/driver?pair={token}"
+    return {
+        "token": token,
+        "driver_id": driver_id,
+        "driver_name": driver_name,
+        "url": phone_url,
+    }
+
+
+@app.get("/api/driver/session")
+def get_driver_phone_session(request: Request):
+    """
+    Returns authenticated driver profile, active vehicle/delivery assignment,
+    and active tracking session for smartphone browser upon pairing.
+    """
+    pair_token = request.query_params.get("pair") or request.query_params.get("token") or request.headers.get("x-pairing-token")
+    device_id = request.headers.get("x-device-id") or request.query_params.get("device_id")
+
+    valid, reason = validate_pairing_token(pair_token, device_id=device_id)
+    if not valid:
+        raise AppError(403, "FORBIDDEN", f"Invalid pairing token: {reason}")
+
+    with immediate_transaction() as conn:
+        tok_row = conn.execute("SELECT * FROM phone_pairing_tokens WHERE token = ?", (pair_token,)).fetchone()
+        driver_id = tok_row["driver_id"] if tok_row else None
+
+        if not driver_id:
+            # If token was generic, pick first driver
+            first_drv = conn.execute("SELECT driver_id FROM drivers ORDER BY driver_id ASC LIMIT 1").fetchone()
+            if first_drv:
+                driver_id = first_drv["driver_id"]
+                conn.execute("UPDATE phone_pairing_tokens SET driver_id = ? WHERE token = ?", (driver_id, pair_token))
+
+        drv = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone() if driver_id else None
+        if not drv:
+            raise AppError(404, "NOT_FOUND", "Paired driver profile not found.")
+
+        # Check active assignment
+        asg = conn.execute(
+            """
+            SELECT a.assignment_id, a.vehicle_id, a.delivery_id, v.registration_no, v.type as vehicle_type,
+                   del.status as delivery_status, del.pickup, del.dropoff
+            FROM assignments a
+            LEFT JOIN vehicles v ON v.vehicle_id = a.vehicle_id
+            LEFT JOIN deliveries del ON del.delivery_id = a.delivery_id
+            WHERE a.driver_id = ? AND a.released_at IS NULL
+            """,
+            (driver_id,),
+        ).fetchone()
+
+        vehicle_id = asg["vehicle_id"] if asg else None
+        vehicle_reg = asg["registration_no"] if asg else None
+        delivery_id = asg["delivery_id"] if asg else None
+        delivery_status = asg["delivery_status"] if asg else None
+
+        # Register device in devices table if device_id provided
+        now_str = utc_now_iso()
+        if device_id:
+            dev_exists = conn.execute("SELECT 1 FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+            if not dev_exists:
+                conn.execute(
+                    """
+                    INSERT INTO devices (device_id, driver_id, nickname, registered_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (device_id, driver_id, f"Mobile Phone ({drv['name'][:12]})", now_str, now_str),
+                )
+            else:
+                conn.execute("UPDATE devices SET last_seen_at = ?, driver_id = ? WHERE device_id = ?", (now_str, driver_id, device_id))
+
+        # Check or start active tracking session
+        sess_row = conn.execute(
+            "SELECT * FROM tracking_sessions WHERE driver_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1",
+            (driver_id,),
+        ).fetchone()
+
+        if sess_row:
+            session_id = sess_row["session_id"]
+        else:
+            session_id = f"TRK-{uuid.uuid4().hex[:10].upper()}"
+            is_demo_val = drv["is_demo"] if "is_demo" in drv.keys() else 0
+            conn.execute(
+                """
+                INSERT INTO tracking_sessions (session_id, driver_id, device_id, vehicle_id, delivery_id, started_at, status, is_demo, consent_given, consent_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)
+                """,
+                (session_id, driver_id, device_id, vehicle_id, delivery_id, now_str, is_demo_val, now_str),
+            )
+
+        return {
+            "status": "ok",
+            "token": pair_token,
+            "driver_id": driver_id,
+            "driver_name": drv["name"],
+            "phone": drv["phone"],
+            "is_demo": bool(drv["is_demo"] if "is_demo" in drv.keys() else False),
+            "vehicle_id": vehicle_id,
+            "vehicle_reg": vehicle_reg,
+            "delivery_id": delivery_id,
+            "delivery_status": delivery_status,
+            "session_id": session_id,
+            "device_id": device_id,
+        }
 
 
 @app.get("/api/pairing-tokens")
@@ -392,6 +521,12 @@ def serve_driver_portal(request: Request):
 def health_check():
     """Minimal operational health check returning only status."""
     return {"status": "ok"}
+
+
+@app.get("/ping", response_class=PlainTextResponse)
+def ping_check():
+    """Public pre-flight reachability probe for smartphone browsers before pairing."""
+    return PlainTextResponse("ok")
 
 
 @app.get("/network-info")
@@ -2696,8 +2831,11 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
         # ---------------------------------------------------------------------
         from app.gps_pipeline import (
             KalmanFilter2D,
+            calculate_95pct_radius,
+            calculate_accuracy_score,
             calculate_eta_and_progress,
             calculate_position_confidence,
+            calculate_sigma_pos,
             check_geofence_arrival,
             equirectangular_project,
             get_accuracy_quality_label,
@@ -2818,6 +2956,11 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
                 (now_str, client_ip, device_id),
             )
 
+        acc_score = calculate_accuracy_score(body.accuracy)
+        sig_pos_val = calculate_sigma_pos(body.accuracy)
+        r95_val = calculate_95pct_radius(sig_pos_val)
+        c50_val = round(calculate_position_confidence(sig_pos_val, 50.0) * 100, 1) if sig_pos_val else None
+
         record = {
             "location_id": loc_id,
             "session_id": body.session_id,
@@ -2828,6 +2971,11 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             "latitude": body.latitude,
             "longitude": body.longitude,
             "accuracy": body.accuracy,
+            "accuracy_score": acc_score,
+            "accuracy_quality_label": acc_label,
+            "sigma_pos": round(sig_pos_val, 1) if sig_pos_val else None,
+            "radius_95m": r95_val,
+            "confidence_50m": c50_val,
             "altitude": body.altitude,
             "altitude_accuracy": body.altitude_accuracy,
             "speed": body.speed,
@@ -2840,7 +2988,6 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
             "device_timestamp": body.device_timestamp,
             "server_timestamp": now_str,
             "is_valid": True,
-            "accuracy_quality_label": acc_label,
             "position_confidence": pos_conf,
             "eta": eta_payload,
             "street_view_url": make_street_view_url(body.latitude, body.longitude),
@@ -2848,6 +2995,144 @@ def record_gps_location(body: GPSLocationCreate, request: Request):
 
     broadcast_event("gps_location_update", record)
     return record
+
+
+@app.get("/tracking/drivers/live")
+def get_live_drivers():
+    """
+    Returns real-time fleet overview of ALL drivers with their latest phone GPS fix,
+    device sensors (battery, network), assigned vehicle/delivery, accuracy scores,
+    position confidence, live/stale/offline status, and trail.
+    """
+    from app.gps_pipeline import (
+        calculate_95pct_radius,
+        calculate_accuracy_score,
+        calculate_position_confidence,
+        calculate_sigma_pos,
+        get_accuracy_quality_label,
+    )
+    now_dt = datetime.now(UTC)
+
+    with read_conn() as conn:
+        drivers = [dict(r) for r in conn.execute("SELECT driver_id, name, phone, availability_status, is_demo FROM drivers ORDER BY driver_id ASC").fetchall()]
+
+        live_list = []
+        counts = {"total": len(drivers), "live": 0, "stale": 0, "offline": 0, "on_delivery": 0}
+
+        for d in drivers:
+            did = d["driver_id"]
+
+            # Active assignment
+            asg = conn.execute(
+                """
+                SELECT a.assignment_id, a.vehicle_id, a.delivery_id, v.registration_no, v.type as vehicle_type,
+                       del.status as delivery_status, del.pickup, del.dropoff
+                FROM assignments a
+                LEFT JOIN vehicles v ON v.vehicle_id = a.vehicle_id
+                LEFT JOIN deliveries del ON del.delivery_id = a.delivery_id
+                WHERE a.driver_id = ? AND a.released_at IS NULL
+                """,
+                (did,),
+            ).fetchone()
+
+            # Device
+            dev = conn.execute(
+                "SELECT device_id, model, platform, os_family, browser_family, last_seen_at FROM devices WHERE driver_id = ? ORDER BY last_seen_at DESC LIMIT 1",
+                (did,),
+            ).fetchone()
+
+            # Latest fix
+            fix = conn.execute(
+                """
+                SELECT location_id, latitude, longitude, accuracy, speed, heading, altitude,
+                       server_timestamp, device_timestamp, source, filtered_latitude, filtered_longitude
+                FROM gps_locations
+                WHERE driver_id = ?
+                ORDER BY server_timestamp DESC, rowid DESC
+                LIMIT 1
+                """,
+                (did,),
+            ).fetchone()
+
+            # Recent trail (up to 15 points)
+            trail_rows = conn.execute(
+                """
+                SELECT latitude, longitude, server_timestamp
+                FROM gps_locations
+                WHERE driver_id = ?
+                ORDER BY server_timestamp DESC, rowid DESC
+                LIMIT 15
+                """,
+                (did,),
+            ).fetchall()
+            trail = [{"lat": r["latitude"], "lng": r["longitude"], "ts": r["server_timestamp"]} for r in reversed(trail_rows)]
+
+            item: dict[str, Any] = {
+                "driver_id": did,
+                "driver_name": d["name"],
+                "phone": d["phone"],
+                "availability_status": d["availability_status"],
+                "is_demo": bool(d.get("is_demo", 0)),
+                "vehicle": dict(asg) if asg else None,
+                "device": dict(dev) if dev else None,
+                "trail": trail,
+                "latest_fix": None,
+                "status": "offline",
+                "age_seconds": None,
+                "age_display": "Never",
+            }
+
+            if asg and asg["delivery_id"]:
+                counts["on_delivery"] += 1
+
+            if fix:
+                fix_dict = dict(fix)
+                try:
+                    srv_ts = fix_dict["server_timestamp"]
+                    srv_dt = datetime.fromisoformat(srv_ts.replace("Z", "+00:00"))
+                    age_s = max(0.0, (now_dt - srv_dt).total_seconds())
+                except Exception:
+                    age_s = 9999.0
+
+                item["age_seconds"] = round(age_s, 1)
+
+                if age_s < 60:
+                    item["age_display"] = f"{int(age_s)} s ago"
+                elif age_s < 3600:
+                    mins = int(age_s // 60)
+                    secs = int(age_s % 60)
+                    item["age_display"] = f"{mins} min {secs} s ago"
+                else:
+                    hours = int(age_s // 3600)
+                    mins = int((age_s % 3600) // 60)
+                    item["age_display"] = f"{hours} h {mins} min ago"
+
+                # Status thresholds: LIVE <= 90s, STALE 90-300s, OFFLINE > 300s
+                if age_s <= 90.0:
+                    item["status"] = "live"
+                    counts["live"] += 1
+                elif age_s <= 300.0:
+                    item["status"] = "stale"
+                    counts["stale"] += 1
+                else:
+                    item["status"] = "offline"
+                    counts["offline"] += 1
+
+                acc = fix_dict["accuracy"]
+                sig = calculate_sigma_pos(acc)
+                fix_dict["accuracy_label"] = get_accuracy_quality_label(acc)
+                fix_dict["accuracy_score"] = calculate_accuracy_score(acc)
+                fix_dict["sigma_pos"] = round(sig, 1) if sig else None
+                fix_dict["radius_95m"] = calculate_95pct_radius(sig) if sig else None
+                fix_dict["confidence_50m"] = round(calculate_position_confidence(sig, 50.0) * 100, 1) if sig else None
+
+                item["latest_fix"] = fix_dict
+            else:
+                counts["offline"] += 1
+
+            live_list.append(item)
+
+        return {"counts": counts, "drivers": live_list}
 
 
 @app.get("/tracking/drivers/{driver_id}/latest")

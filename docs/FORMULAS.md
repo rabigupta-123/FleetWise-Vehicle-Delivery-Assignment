@@ -73,17 +73,51 @@ $$Q_{\text{freshness}} = 100.0 \times \exp\left(-\frac{\Delta t_{\text{age}}}{30
 
 ---
 
-## 4. GPS Accuracy Quality Score ($Q_{\text{GPS}}$)
+## 4. GPS Accuracy Quality Score, Uncertainty & Position Confidence
 
-Horizontal radial accuracy reported by the hardware GPS sensor is scored using an exponential decay model with reference constant $\sigma_{\text{GPS}} = 50.0\text{ m}$:
+Horizontal radial accuracy reported by the hardware GPS sensor is scored using an exponential decay model with reference constant scale $50.0\text{ m}$:
 
-$$Q_{\text{GPS}} = 100.0 \times \exp\left(-\frac{\text{accuracy}}{50.0}\right)$$
+### Accuracy Quality Score Formula
+$$S = 100.0 \times \exp\left(-\frac{\text{accuracy}}{50.0}\right), \quad S \in [0.0, 100.0]$$
 
-### Worked Example
-- For a high-precision mobile fix with $\text{accuracy} = 15.0\text{ m}$:
-  $$Q_{\text{GPS}} = 100.0 \times \exp\left(-\frac{15.0}{50.0}\right) = 74.08$$
-- For $\text{accuracy} = 5.0\text{ m}$:
-  $$Q_{\text{GPS}} = 100.0 \times \exp(-0.1) = 90.48$$
+If accuracy is null or invalid, $S = \text{null}$ (displayed as "n/a").
+
+### Quality Tiers (Uncapped Raw Accuracy)
+- **Excellent**: $\le 5.0\text{ m}$
+- **Good**: $\le 15.0\text{ m}$
+- **Fair**: $\le 50.0\text{ m}$
+- **Poor**: $\le 100.0\text{ m}$
+- **Very poor**: $> 100.0\text{ m}$
+
+### Radius-Confidence Assumption (1-$\sigma$ Standard Deviation)
+Modern operating systems report horizontal accuracy as a confidence circle. Android reports a $68\%$ probability radius ($p = 0.68$), while the W3C Geolocation specification specifies a $95\%$ probability ($p = 0.95$). FleetWise models this via the configurable parameter `ACCURACY_CONFIDENCE_P` (default $0.68$):
+
+$$\sigma_{\text{pos}} = \frac{\text{accuracy}}{\sqrt{-2 \ln(1 - p)}}$$
+
+For $p = 0.68$:
+$$\sqrt{-2 \ln(1 - 0.68)} = \sqrt{-2 \ln(0.32)} \approx 1.5096 \implies \sigma_{\text{pos}} = \frac{\text{accuracy}}{1.5096}$$
+
+### 95% Confidence Radius
+$$r_{95} = \sigma_{\text{pos}} \times \sqrt{-2 \ln(0.05)} \approx 2.4477 \times \sigma_{\text{pos}}$$
+
+### Position Confidence Probability
+The analytical probability that the vehicle's true position is within $r$ meters of the estimated coordinate:
+
+$$C_{\text{pos}}(r) = 1.0 - \exp\left(-\frac{r^2}{2 \sigma_{\text{pos}}^2}\right)$$
+
+### Worked Example: Commercial Smartphone at 76 m Accuracy
+- **Raw Accuracy**: $\text{accuracy} = 76.0\text{ m}$ (Tier: **Poor**)
+- **Accuracy Quality Score**:
+  $$S = 100.0 \times \exp\left(-\frac{76.0}{50.0}\right) = 100.0 \times \exp(-1.52) = 21.9$$
+- **1-$\sigma$ Standard Deviation**:
+  $$\sigma_{\text{pos}} = \frac{76.0}{1.5096} = 50.3\text{ m}$$
+- **95% Confidence Radius**:
+  $$r_{95} = 50.3447 \times 2.4477 = 123.2\text{ m}$$
+- **Position Confidence at Geofence Radius ($r = 50.0\text{ m}$)**:
+  $$C_{\text{pos}}(50.0\text{ m}) = 1.0 - \exp\left(-\frac{50.0^2}{2 \times 50.3447^2}\right) = 1.0 - \exp(-0.4932) \approx 0.389 \implies 38.9\% \ (\approx 39\%)$$
+
+> [!NOTE]
+> Physical GPS accuracy originates entirely from the client device hardware sensor and satellite geometry. Software algorithms and filtering cannot magically improve raw sensor accuracy. Laptops and desktop browsers relying on Wi-Fi positioning or IP geolocation typically exhibit accuracies of tens to hundreds of meters.
 
 ---
 

@@ -1622,12 +1622,377 @@ const MAPS = {
   'vehicle-map': null,
   'delivery-map': null,
   'driver-mini-map': null,
+  'live-fleet-map': null,
   layers: {
     'vehicle-map': {},
     'delivery-map': {},
     'driver-mini-map': {},
+    'live-fleet-map': {},
   },
 };
+
+/* ==================== LIVE FLEET TRACKING ENGINE (Task 3) ==================== */
+const FLEET_MAP_STATE = {
+  map: null,
+  markers: new Map(),
+  circles: new Map(),
+  trails: new Map(),
+  showCircles: true,
+  activeFilter: 'all',
+  driversData: [],
+  lastThrottleTs: 0,
+};
+
+function computeAccuracyMetrics(accuracy_m) {
+  if (accuracy_m == null || !Number.isFinite(accuracy_m) || accuracy_m < 0) {
+    return { score: 'n/a', label: 'Unknown', sigma: null, r95: null, conf50: null };
+  }
+  const score = Math.round(Math.max(0, Math.min(100, 100 * Math.exp(-accuracy_m / 50.0))));
+  let label = 'Very poor';
+  if (accuracy_m <= 5.0) label = 'Excellent';
+  else if (accuracy_m <= 15.0) label = 'Good';
+  else if (accuracy_m <= 50.0) label = 'Fair';
+  else if (accuracy_m <= 100.0) label = 'Poor';
+
+  const sigma = accuracy_m / 1.509592;
+  const r95 = (sigma * 2.4477469).toFixed(1);
+  const conf50 = Math.round((1.0 - Math.exp(-(50.0 * 50.0) / (2.0 * sigma * sigma))) * 100);
+  return { score, label, sigma: sigma.toFixed(1), r95, conf50 };
+}
+
+function initLiveFleetMap() {
+  const container = document.getElementById('live-fleet-map');
+  if (!container || typeof window.L === 'undefined') return;
+
+  if (FLEET_MAP_STATE.map) {
+    setTimeout(() => {
+      try { FLEET_MAP_STATE.map.invalidateSize(); } catch {}
+    }, 60);
+    return FLEET_MAP_STATE.map;
+  }
+
+  const map = window.L.map('live-fleet-map', {
+    attributionControl: false,
+    zoomControl: true,
+  }).setView([12.9716, 77.5946], 13);
+
+  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxNativeZoom: 19,
+    maxZoom: 22,
+    subdomains: ['a', 'b', 'c'],
+  }).addTo(map);
+
+  FLEET_MAP_STATE.map = map;
+  return map;
+}
+
+async function loadLiveDriversFleet() {
+  try {
+    const data = await apiRequest('/tracking/drivers/live');
+    if (!data || !data.drivers) return;
+
+    FLEET_MAP_STATE.driversData = data.drivers;
+
+    const c = data.counts || {};
+    const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setTxt('count-fleet-all', c.total ?? data.drivers.length);
+    setTxt('count-fleet-live', c.live ?? 0);
+    setTxt('count-fleet-stale', c.stale ?? 0);
+    setTxt('count-fleet-offline', c.offline ?? 0);
+    setTxt('count-fleet-on-delivery', c.on_delivery ?? 0);
+
+    const syncEl = document.getElementById('fleet-last-sync-time');
+    if (syncEl) syncEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    renderDriverFleetList(data.drivers);
+    updateAllDriverMarkers(data.drivers);
+  } catch (err) {
+    console.warn('Failed to load live drivers fleet:', err);
+  }
+}
+
+function renderDriverFleetList(drivers) {
+  const listEl = document.getElementById('driver-fleet-list');
+  if (!listEl) return;
+
+  const filter = FLEET_MAP_STATE.activeFilter;
+  let filtered = drivers.filter(d => {
+    if (filter === 'live') return d.status === 'live';
+    if (filter === 'stale') return d.status === 'stale';
+    if (filter === 'offline') return d.status === 'offline';
+    if (filter === 'on_delivery') return d.vehicle && d.vehicle.delivery_id;
+    return true;
+  });
+
+  const priority = { live: 0, stale: 1, offline: 2 };
+  filtered.sort((a, b) => (priority[a.status] ?? 3) - (priority[b.status] ?? 3));
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<div class="text-center p-md text-muted" style="font-size:12px;">No drivers match filter "${filter}".</div>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered.map(d => {
+    const fix = d.latest_fix;
+    const v = d.vehicle;
+    const isLive = d.status === 'live';
+    const isStale = d.status === 'stale';
+    const statusPillClass = isLive ? 'badge badge-success' : (isStale ? 'badge badge-warning' : 'badge status-inactive');
+    const statusDot = isLive ? '<span class="pulse-dot"></span> ' : '';
+
+    let fixDetails = '<div class="kpi-sub" style="font-size:11px;">No GPS fix recorded</div>';
+    if (fix) {
+      const spd = fix.speed != null ? `${(fix.speed * 3.6).toFixed(1)} km/h` : '0 km/h';
+      const scoreTxt = fix.accuracy_score != null ? `Score ${fix.accuracy_score}/100` : 'n/a';
+      const r95Txt = fix.radius_95m != null ? `r₉₅: ${fix.radius_95m}m` : '';
+      const confTxt = fix.confidence_50m != null ? `50m: ${fix.confidence_50m}%` : '';
+      fixDetails = `
+        <div style="display:flex; justify-content:space-between; font-size:11px; margin-top:3px; color:var(--color-foreground);">
+          <span>±${fix.accuracy.toFixed(1)}m · ${scoreTxt}</span>
+          <span>${spd}</span>
+        </div>
+        <div class="kpi-sub" style="font-size:10px; display:flex; justify-content:space-between; margin-top:1px;">
+          <span>${r95Txt} ${confTxt ? '· ' + confTxt : ''}</span>
+          <span>${d.age_display || ''}</span>
+        </div>
+      `;
+    }
+
+    const vehicleTag = v ? `
+      <span class="badge badge-sm" style="background:rgba(0, 240, 255, 0.1); color:var(--color-primary); font-size:10px;">
+        ${escapeHtml(v.registration_no || v.vehicle_id)} (${escapeHtml(v.vehicle_type || 'vehicle')})
+      </span>
+    ` : '<span class="kpi-sub" style="font-size:10px;">Unassigned</span>';
+
+    return `
+      <div class="driver-fleet-card p-xs" data-driver-id="${escapeHtml(d.driver_id)}"
+           style="background:var(--color-card); border:1px solid ${isLive ? 'rgba(34, 197, 94, 0.4)' : (isStale ? 'rgba(234, 179, 8, 0.4)' : 'var(--color-border)')};
+                  border-radius:var(--radius-sm); padding:8px 10px; cursor:pointer; transition:border-color 0.15s ease;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:4px;">
+          <div>
+            <strong style="font-size:12px; color:var(--color-foreground);">${escapeHtml(d.driver_name)}</strong>
+            <div style="margin-top:2px;">${vehicleTag}</div>
+          </div>
+          <span class="${statusPillClass}" style="font-size:10px; padding:2px 6px;">
+            ${statusDot}${d.status.toUpperCase()}
+          </span>
+        </div>
+        ${fixDetails}
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.driver-fleet-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const did = card.getAttribute('data-driver-id');
+      focusDriverOnMap(did);
+    });
+  });
+}
+
+function updateAllDriverMarkers(drivers) {
+  const map = FLEET_MAP_STATE.map;
+  if (!map || typeof window.L === 'undefined') return;
+
+  drivers.forEach(d => {
+    const fix = d.latest_fix;
+    if (!fix) return;
+
+    const lat = fix.latitude;
+    const lng = fix.longitude;
+    const isLive = d.status === 'live';
+    const isStale = d.status === 'stale';
+
+    const color = isLive ? '#22C55E' : (isStale ? '#EAB308' : '#94A3B8');
+    const opacity = isLive ? 1.0 : (isStale ? 0.8 : 0.45);
+
+    const hdg = fix.heading || 0;
+    const customIcon = window.L.divIcon({
+      className: 'fleet-driver-pin',
+      html: `
+        <div style="position:relative; width:32px; height:32px; display:flex; align-items:center; justify-content:center; opacity:${opacity};">
+          <div style="position:absolute; width:28px; height:28px; border-radius:50%; background:${color}; border:2px solid #ffffff; box-shadow:0 2px 8px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; transform: rotate(${hdg}deg);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 19 21 12 17 5 21 12 2"></polygon>
+            </svg>
+          </div>
+        </div>
+      `,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    });
+
+    let marker = FLEET_MAP_STATE.markers.get(d.driver_id);
+    if (!marker) {
+      marker = window.L.marker([lat, lng], { icon: customIcon }).addTo(map);
+      FLEET_MAP_STATE.markers.set(d.driver_id, marker);
+    } else {
+      marker.setLatLng([lat, lng]);
+      marker.setIcon(customIcon);
+    }
+
+    const v = d.vehicle;
+    const spd = fix.speed != null ? `${(fix.speed * 3.6).toFixed(1)} km/h` : '0 km/h';
+    const scoreTxt = fix.accuracy_score != null ? `${fix.accuracy_score}/100` : 'n/a';
+    const r95Txt = fix.radius_95m != null ? `${fix.radius_95m} m` : 'n/a';
+    const confTxt = fix.confidence_50m != null ? `${fix.confidence_50m}%` : 'n/a';
+    const svUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat.toFixed(6)},${lng.toFixed(6)}`;
+
+    const popupHtml = `
+      <div style="font-family:inherit; min-width:210px; font-size:12px; line-height:1.4;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:4px; margin-bottom:6px;">
+          <strong style="font-size:13px; color:#0f172a;">${escapeHtml(d.driver_name)}</strong>
+          <span style="font-weight:700; color:${color}; text-transform:uppercase; font-size:10px;">${d.status}</span>
+        </div>
+        <div><strong>Vehicle:</strong> ${v ? escapeHtml(v.registration_no || v.vehicle_id) : 'None'}</div>
+        <div><strong>Speed:</strong> ${spd} · <strong>Heading:</strong> ${hdg.toFixed(0)}°</div>
+        <div><strong>Raw Accuracy:</strong> ±${fix.accuracy.toFixed(1)} m</div>
+        <div><strong>Accuracy Score:</strong> ${scoreTxt}</div>
+        <div><strong>95% Radius:</strong> ${r95Txt} · <strong>50m Conf:</strong> ${confTxt}</div>
+        <div><strong>Last Ping:</strong> ${d.age_display || 'Just now'}</div>
+        <div style="margin-top:6px; padding-top:4px; border-top:1px solid #e2e8f0;">
+          <a href="${svUrl}" target="_blank" rel="noopener noreferrer" style="color:#0284c7; text-decoration:none; font-weight:600;">
+            Open Google Street View &rarr;
+          </a>
+        </div>
+      </div>
+    `;
+    marker.bindPopup(popupHtml);
+
+    let circle = FLEET_MAP_STATE.circles.get(d.driver_id);
+    if (!circle) {
+      circle = window.L.circle([lat, lng], {
+        radius: fix.accuracy,
+        color: color,
+        fillColor: color,
+        fillOpacity: 0.12,
+        weight: 1,
+      });
+      if (FLEET_MAP_STATE.showCircles) circle.addTo(map);
+      FLEET_MAP_STATE.circles.set(d.driver_id, circle);
+    } else {
+      circle.setLatLng([lat, lng]);
+      circle.setRadius(fix.accuracy);
+      circle.setStyle({ color: color, fillColor: color });
+      if (FLEET_MAP_STATE.showCircles && !map.hasLayer(circle)) circle.addTo(map);
+      else if (!FLEET_MAP_STATE.showCircles && map.hasLayer(circle)) map.removeLayer(circle);
+    }
+
+    if (d.trail && d.trail.length > 1) {
+      const latlngs = d.trail.map(p => [p.lat, p.lng]);
+      let trail = FLEET_MAP_STATE.trails.get(d.driver_id);
+      if (!trail) {
+        trail = window.L.polyline(latlngs, {
+          color: color,
+          weight: 2,
+          dashArray: '4, 4',
+          opacity: 0.6,
+        }).addTo(map);
+        FLEET_MAP_STATE.trails.set(d.driver_id, trail);
+      } else {
+        trail.setLatLngs(latlngs);
+        trail.setStyle({ color: color });
+      }
+    }
+  });
+}
+
+function focusDriverOnMap(driverId) {
+  const map = FLEET_MAP_STATE.map;
+  const marker = FLEET_MAP_STATE.markers.get(driverId);
+  if (!map || !marker) return;
+
+  const latlng = marker.getLatLng();
+  map.setView(latlng, 17, { animate: true });
+  marker.openPopup();
+}
+
+function fitAllFleetDrivers() {
+  const map = FLEET_MAP_STATE.map;
+  if (!map) return;
+
+  const coords = [];
+  FLEET_MAP_STATE.markers.forEach(m => {
+    coords.push(m.getLatLng());
+  });
+
+  if (coords.length > 0) {
+    const bounds = window.L.latLngBounds(coords);
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+  }
+}
+
+function toggleAccuracyCircles() {
+  FLEET_MAP_STATE.showCircles = !FLEET_MAP_STATE.showCircles;
+  const map = FLEET_MAP_STATE.map;
+  const txt = document.getElementById('txt-toggle-accuracy-circles');
+  if (txt) txt.textContent = `Circles: ${FLEET_MAP_STATE.showCircles ? 'ON' : 'OFF'}`;
+
+  FLEET_MAP_STATE.circles.forEach(circle => {
+    if (map) {
+      if (FLEET_MAP_STATE.showCircles) {
+        if (!map.hasLayer(circle)) circle.addTo(map);
+      } else {
+        if (map.hasLayer(circle)) map.removeLayer(circle);
+      }
+    }
+  });
+}
+
+async function openPairDriverModal() {
+  const modal = document.getElementById('modal-pair-driver');
+  const select = document.getElementById('select-pair-driver-target');
+  const resWrap = document.getElementById('pair-token-result');
+  if (resWrap) resWrap.classList.add('hidden');
+
+  if (select) {
+    select.innerHTML = '<option value="">-- Choose Driver to Pair --</option>' +
+      STATE.drivers.map(d => `<option value="${escapeHtml(d.driver_id)}">${escapeHtml(d.name)} (${escapeHtml(d.driver_id)})</option>`).join('');
+  }
+  if (modal) modal.classList.remove('hidden');
+}
+
+async function generateDriverPairToken() {
+  const select = document.getElementById('select-pair-driver-target');
+  const driverId = select ? select.value : '';
+  if (!driverId) {
+    alert('Please select a driver to generate pairing token.');
+    return;
+  }
+
+  try {
+    const res = await apiRequest('/api/pairing-tokens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ driver_id: driverId }),
+    });
+
+    const qrContainer = document.getElementById('pair-driver-qr-container');
+    const urlInput = document.getElementById('pair-driver-url-input');
+    const badgeEl = document.getElementById('pair-driver-name-badge');
+    const resWrap = document.getElementById('pair-token-result');
+
+    if (urlInput) urlInput.value = res.url;
+    if (badgeEl) badgeEl.textContent = `${res.driver_name || res.driver_id} Bound`;
+
+    if (qrContainer && window.QRCode) {
+      qrContainer.innerHTML = '';
+      new window.QRCode(qrContainer, {
+        text: res.url,
+        width: 192,
+        height: 192,
+        colorDark: '#0f172a',
+        colorLight: '#ffffff',
+        correctLevel: window.QRCode.CorrectLevel.M,
+      });
+    }
+
+    if (resWrap) resWrap.classList.remove('hidden');
+  } catch (err) {
+    alert(`Failed to generate pairing token: ${err.message}`);
+  }
+}
+
 
 function getOrCreateLeafletMap(containerId, center = [12.9716, 77.5946], zoom = 13) {
   if (typeof window.L === 'undefined') {
@@ -1654,7 +2019,8 @@ function getOrCreateLeafletMap(containerId, center = [12.9716, 77.5946], zoom = 
     }).setView(center, zoom);
 
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+      maxNativeZoom: 19,
+      maxZoom: 22,
       subdomains: ['a', 'b', 'c'],
     }).addTo(map);
 
@@ -2122,6 +2488,9 @@ async function loadDeliveryTrackingData(deliveryId, silent = false) {
 
 /* --- Driver Smartphone GPS Portal --- */
 function renderDriverGpsPortal() {
+  initLiveFleetMap();
+  loadLiveDriversFleet();
+
   const select = document.getElementById('driver-gps-select');
   if (!select) return;
 
@@ -2695,14 +3064,20 @@ function handleIncomingGpsFix(pos) {
   const pingEl = document.getElementById('disp-last-ping');
   const svWrap = document.getElementById('disp-streetview-wrap');
 
+  const accMetrics = computeAccuracyMetrics(accuracy);
+  const accSubEl = document.getElementById('disp-acc-sub');
   if (latEl) latEl.textContent = lat.toFixed(6);
   if (lngEl) lngEl.textContent = lng.toFixed(6);
-  if (accEl) accEl.textContent = `\u00B1${accuracy.toFixed(1)}m`;
+  if (accEl) accEl.textContent = `${accuracy.toFixed(1)} m`;
+  if (accSubEl) {
+    accSubEl.textContent = `Score ${accMetrics.score}/100 · ${accMetrics.label} (r₉₅: ${accMetrics.r95}m, 50m conf: ${accMetrics.conf50}%)`;
+    accSubEl.className = 'telemetry-sub';
+  }
   if (speedEl) speedEl.textContent = speed != null ? speed.toFixed(1) : '0.0';
   if (altEl) altEl.textContent = altitude != null ? `${altitude.toFixed(1)} m` : '—';
   if (headEl) headEl.textContent = heading != null ? `${heading.toFixed(0)}\u00B0` : '—';
   if (countEl) countEl.textContent = TRACKING_STATE.fixCount;
-  if (pingEl) pingEl.textContent = new Date().toLocaleTimeString([], { hour12: false });
+  if (pingEl) pingEl.textContent = 'Just now (0 s ago)';
 
   if (svWrap) {
     const svUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat.toFixed(6)},${lng.toFixed(6)}`;
@@ -3032,6 +3407,31 @@ function setupEventListeners() {
 
   // Dismiss global error
   document.getElementById('btn-dismiss-error')?.addEventListener('click', clearGlobalError);
+
+  // Live Fleet Map toolbar & filters
+  document.getElementById('btn-open-pair-driver-modal')?.addEventListener('click', openPairDriverModal);
+  document.getElementById('btn-fit-all-drivers')?.addEventListener('click', fitAllFleetDrivers);
+  document.getElementById('btn-toggle-accuracy-circles')?.addEventListener('click', toggleAccuracyCircles);
+  document.getElementById('btn-generate-pair-token')?.addEventListener('click', generateDriverPairToken);
+  document.getElementById('btn-copy-pair-url')?.addEventListener('click', () => {
+    const input = document.getElementById('pair-driver-url-input');
+    if (input && input.value) {
+      navigator.clipboard.writeText(input.value).then(() => showToast('Pairing link copied to clipboard!'));
+    }
+  });
+
+  document.querySelectorAll('.fleet-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.fleet-filter-btn').forEach(b => {
+        b.classList.remove('btn-primary', 'active');
+        b.classList.add('btn-secondary');
+      });
+      btn.classList.remove('btn-secondary');
+      btn.classList.add('btn-primary', 'active');
+      FLEET_MAP_STATE.activeFilter = btn.getAttribute('data-filter') || 'all';
+      renderDriverFleetList(FLEET_MAP_STATE.driversData);
+    });
+  });
 
   // Quick buttons
   document.getElementById('btn-refresh-now')?.addEventListener('click', () => refreshAllData());

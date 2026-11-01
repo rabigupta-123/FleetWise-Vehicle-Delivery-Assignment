@@ -10,7 +10,9 @@ Supports:
 import argparse
 import asyncio
 import os
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -120,15 +122,19 @@ def print_access_table(lan_ip: str, pairing_token: str, share_mode: bool) -> Non
         print("     Mobile phones can ONLY access /driver, /probe, and /tracking with their pairing token.")
 
     print("\n [i] Notice for Windows Firewall (if mobile device cannot connect over Wi-Fi):")
-    print("     Run in an elevated PowerShell terminal to allow ports 8000 and 8443:")
-    print("     New-NetFirewallRule -DisplayName 'FleetWise Server' -Direction Inbound -LocalPort 8000,8443 -Protocol TCP -Action Allow")
+    print("     Run in an elevated PowerShell terminal to allow incoming traffic on port 8443:")
+    print("     New-NetFirewallRule -DisplayName 'FleetWise 8443' -Direction Inbound -LocalPort 8443 -Protocol TCP -Action Allow -Profile Private -RemoteAddress LocalSubnet")
     print("-" * 80)
 
     print_qr_code(phone_driver_url)
     print("-" * 80 + "\n")
 
 
-async def run_dual_servers(share_mode: bool = False, override_ip: str | None = None):
+async def run_dual_servers(
+    share_mode: bool = False,
+    override_ip: str | None = None,
+    use_tunnel: bool = False,
+):
     if share_mode:
         os.environ["FLEETWISE_SHARE_LAN"] = "1"
 
@@ -140,6 +146,25 @@ async def run_dual_servers(share_mode: bool = False, override_ip: str | None = N
     has_certs = os.path.exists("certs/cert.pem") and os.path.exists("certs/key.pem")
 
     print_access_table(lan_ip, pairing_token, share_mode)
+
+    # Optional cloudflared tunnel
+    tunnel_proc = None
+    if use_tunnel:
+        cpath = shutil.which("cloudflared")
+        if cpath:
+            print(" [i] Launching cloudflared tunnel for smartphone routes...")
+            try:
+                tunnel_proc = subprocess.Popen(
+                    [cpath, "tunnel", "--url", "https://localhost:8443", "--no-tls-verify"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                print("     cloudflared process started (tunneling https://localhost:8443).")
+            except Exception as e:
+                print(f"     [!] Failed to start cloudflared: {e}")
+        else:
+            print(" [!] cloudflared not found in system PATH. Install cloudflared to use --tunnel.")
 
     # 2. HTTP Server (Port 8000)
     # If share mode is on, bind 0.0.0.0; otherwise bind 127.0.0.1 for desktop dashboard
@@ -168,17 +193,28 @@ async def run_dual_servers(share_mode: bool = False, override_ip: str | None = N
         https_server = uvicorn.Server(https_config)
         tasks.append(https_server.serve())
 
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        if tunnel_proc:
+            tunnel_proc.terminate()
 
 
 def main():
     parser = argparse.ArgumentParser(description="FleetWise Dual Server Launcher")
     parser.add_argument("--share", action="store_true", help="Open dashboard access to LAN clients (Insecure Hackathon Mode)")
     parser.add_argument("--ip", type=str, default=None, help="Explicitly specify primary LAN IPv4 address")
+    parser.add_argument("--tunnel", action="store_true", help="Launch secure cloudflared public tunnel for remote driver testing")
     args = parser.parse_args()
 
     try:
-        asyncio.run(run_dual_servers(share_mode=args.share, override_ip=args.ip))
+        asyncio.run(
+            run_dual_servers(
+                share_mode=args.share,
+                override_ip=args.ip,
+                use_tunnel=args.tunnel,
+            )
+        )
     except KeyboardInterrupt:
         print("\n[FleetWise] Server stopped cleanly.")
 

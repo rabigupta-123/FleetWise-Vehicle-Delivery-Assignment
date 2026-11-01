@@ -1,3 +1,4 @@
+import math
 import os
 
 from dotenv import load_dotenv
@@ -105,9 +106,24 @@ HEURISTIC_MIN_GPS_INTERVAL_S: float = 0.5
 # =====================================================================
 # ACCURACY & KALMAN FILTER PIPELINE CONSTANTS (Empirical heuristics)
 # =====================================================================
+# Radius-confidence assumption: probability p that true position is within reported accuracy radius
+# Android Geolocation reports 68% (p = 0.68); W3C Geolocation specifies 95% (p = 0.95).
+ACCURACY_CONFIDENCE_P: float = float(os.environ.get("ACCURACY_CONFIDENCE_P", "0.68"))
+
+
+def get_accuracy_sigma_divisor(p: float | None = None) -> float:
+    """Computes divisor sqrt(-2 * ln(1 - p)) to convert reported accuracy radius to 1-sigma standard deviation."""
+    prob = p if p is not None else ACCURACY_CONFIDENCE_P
+    if prob <= 0.0 or prob >= 1.0:
+        prob = 0.68
+    return math.sqrt(-2.0 * math.log(1.0 - prob))
+
+
 # Browser reported accuracy radius divisor to estimate 1-sigma standard deviation
-# Android reports 68% radius (1 sigma); W3C spec specifies 95% (approx 2 sigma)
-ACCURACY_SIGMA_DIVISOR: float = float(os.environ.get("ACCURACY_SIGMA_DIVISOR", "1.0"))
+# Defaults to sqrt(-2 * ln(1 - 0.68)) = 1.509592... for p = 0.68
+ACCURACY_SIGMA_DIVISOR: float = float(
+    os.environ.get("ACCURACY_SIGMA_DIVISOR", str(get_accuracy_sigma_divisor()))
+)
 
 # Kalman filter process noise: acceleration standard deviation in m/s^2
 KALMAN_SIGMA_A: float = float(os.environ.get("KALMAN_SIGMA_A", "1.5"))

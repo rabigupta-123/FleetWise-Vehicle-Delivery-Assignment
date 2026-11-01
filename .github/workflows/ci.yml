@@ -51,6 +51,9 @@ jobs:
       - name: Math & KaTeX Formatting Check
         run: python scripts/check_math_syntax.py
 
+      - name: Mermaid Diagram Lint & Syntax Check
+        run: python scripts/check_mermaid.py
+
       - name: Node.js Unit & KaTeX AST Tests
         run: node --test tests/test_battery_states.test.js tests/test_katex_syntax.test.js
 

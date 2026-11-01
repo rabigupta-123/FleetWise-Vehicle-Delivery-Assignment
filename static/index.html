@@ -1086,6 +1086,68 @@
             </div>
           </div>
 
+          <!-- ==================== LIVE FLEET GPS TRACKING MAP (Task 3) ==================== -->
+          <div class="table-card mb-xl" style="padding:var(--space-lg);">
+            <div class="toolbar-panel" style="margin-bottom:var(--space-md);">
+              <div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span class="layers-pill"><span class="pulse-dot"></span> LIVE FLEET STREAM</span>
+                  <h3 class="panel-title" style="margin:0; font-size:16px;">LIVE FLEET MAP — PAIRED DRIVER PHONES</h3>
+                </div>
+                <p class="panel-desc" style="font-size:12px; margin:4px 0 0 0;">Real-time tracking of every paired driver phone with uncapped accuracy, quality score S/100, 1-σ confidence, and breadcrumb trails.</p>
+              </div>
+              <div style="display:flex; align-items:center; gap:var(--space-sm); flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-open-pair-driver-modal">
+                  <span data-icon="smartphone"></span><span>Pair Driver Phone</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-fit-all-drivers">
+                  <span data-icon="navigation"></span><span>Fit All Drivers</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-accuracy-circles">
+                  <span data-icon="eye"></span><span id="txt-toggle-accuracy-circles">Circles: ON</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Fleet Status Filter Pills -->
+            <div class="fleet-filter-bar mb-md" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <button type="button" class="btn btn-xs btn-primary fleet-filter-btn active" data-filter="all" id="btn-filter-all">
+                All (<span id="count-fleet-all">0</span>)
+              </button>
+              <button type="button" class="btn btn-xs btn-secondary fleet-filter-btn" data-filter="live" id="btn-filter-live">
+                🟢 Live (&le;90s) (<span id="count-fleet-live">0</span>)
+              </button>
+              <button type="button" class="btn btn-xs btn-secondary fleet-filter-btn" data-filter="stale" id="btn-filter-stale">
+                🟡 Stale (90-300s) (<span id="count-fleet-stale">0</span>)
+              </button>
+              <button type="button" class="btn btn-xs btn-secondary fleet-filter-btn" data-filter="offline" id="btn-filter-offline">
+                ⚪ Offline (&gt;300s) (<span id="count-fleet-offline">0</span>)
+              </button>
+              <button type="button" class="btn btn-xs btn-secondary fleet-filter-btn" data-filter="on_delivery" id="btn-filter-on-delivery">
+                🚚 On Delivery (<span id="count-fleet-on-delivery">0</span>)
+              </button>
+            </div>
+
+            <!-- Dual-Pane Live Fleet Map & Driver List -->
+            <div class="grid-live-fleet" style="display:grid; grid-template-columns:340px 1fr; gap:var(--space-md); min-height:500px;">
+              <!-- Left Side: Driver List -->
+              <div style="background:var(--color-secondary); border-radius:var(--radius-md); padding:var(--space-sm); display:flex; flex-direction:column; max-height:520px; overflow:hidden;">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; border-bottom:1px solid var(--color-border); margin-bottom:6px;">
+                  <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.05em; font-weight:700; color:var(--color-primary);">Drivers Fleet Status</span>
+                  <span class="kpi-sub" style="font-size:10px;" id="fleet-last-sync-time">Syncing...</span>
+                </div>
+                <div id="driver-fleet-list" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:6px; padding-right:2px;">
+                  <div class="text-center p-md text-muted" style="font-size:12px;">Loading fleet drivers...</div>
+                </div>
+              </div>
+
+              <!-- Right Side: Live Fleet Map -->
+              <div style="border-radius:var(--radius-md); overflow:hidden; border:1px solid var(--color-border); position:relative; min-height:500px;">
+                <div id="live-fleet-map" style="width:100%; height:100%; min-height:500px;"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="grid grid-2" style="gap:var(--space-xl);">
             <!-- Driver Identity & Controls -->
             <div class="table-card" style="padding:var(--space-xl);">
@@ -1849,6 +1911,64 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-close-modal="modal-share-link">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Pair Driver Phone -->
+  <div class="modal-backdrop hidden" id="modal-pair-driver" role="dialog" aria-modal="true" aria-labelledby="modal-pair-driver-title">
+    <div class="modal-dialog" style="max-width: 540px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="layers-pill"><span class="pulse-dot"></span> SMARTPHONE PAIRING</span>
+          <h3 class="modal-title" id="modal-pair-driver-title" style="margin:0;">Pair Driver Phone</h3>
+        </div>
+        <button type="button" class="modal-close" data-close-modal="modal-pair-driver" aria-label="Close modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="panel-desc" style="margin-bottom: var(--space-md);">
+          Generate an isolated, single-device bound pairing token for a field driver. Once paired, the driver's phone streams physical GPS fixes directly into FleetWise.
+        </p>
+
+        <div class="form-group mb-md">
+          <label for="select-pair-driver-target" class="form-label">SELECT DRIVER</label>
+          <select id="select-pair-driver-target" class="form-select">
+            <option value="">-- Choose Driver to Pair --</option>
+          </select>
+        </div>
+
+        <div class="text-center mb-md">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-generate-pair-token">
+            <span data-icon="zap"></span><span>Generate Token &amp; QR Code</span>
+          </button>
+        </div>
+
+        <div id="pair-token-result" class="hidden">
+          <div class="share-qr-wrap mb-md text-center">
+            <div id="pair-driver-qr-container" style="display:flex; justify-content:center; align-items:center; background:#ffffff; padding:16px; border-radius:12px; margin:0 auto; width: fit-content; box-shadow: 0 8px 30px rgba(0,240,255,0.15);"></div>
+            <div class="text-center mt-sm">
+              <span class="badge badge-success" id="pair-driver-name-badge">Driver Bound</span>
+            </div>
+          </div>
+
+          <div class="form-group mb-md">
+            <label for="pair-driver-url-input" class="form-label">DRIVER ACCESS URL</label>
+            <div style="display:flex; gap:var(--space-xs);">
+              <input type="text" id="pair-driver-url-input" class="form-input mono" readonly style="font-weight:600; color:var(--color-primary);" />
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-pair-url" title="Copy to clipboard">
+                <span data-icon="copy"></span><span>Copy</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="p-sm" style="background:rgba(0, 240, 255, 0.08); border:1px solid rgba(0, 240, 255, 0.25); border-radius:var(--radius-md); font-size:11px; line-height:1.4;">
+            <strong style="color:var(--color-primary);">🔒 Single-Device Security Binding:</strong>
+            This 192-bit cryptographic token binds to the first physical smartphone that submits GPS coordinates. A second phone using the same token is strictly rejected with 403 Forbidden.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-modal="modal-pair-driver">Close</button>
       </div>
     </div>
   </div>

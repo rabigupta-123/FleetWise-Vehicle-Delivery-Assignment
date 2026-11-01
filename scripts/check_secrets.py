@@ -15,6 +15,8 @@ FORBIDDEN_PATTERNS = [
     (re.compile(r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36}"), "GitHub token detected"),
     (re.compile(r"ey[A-Za-z0-9_-]{10,}\.ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), "Raw JWT token detected"),
     (re.compile(r"place" + r"holder_password", re.IGNORECASE), "Placeholder password detected"),
+    (re.compile(r"[?&]pair=[A-Za-z0-9_-]{20,}"), "Exposed pairing token in URL detected"),
+    (re.compile(r"x-pairing-token:\s*[A-Za-z0-9_-]{20,}", re.IGNORECASE), "Exposed pairing token in headers detected"),
 ]
 
 FORBIDDEN_EXTENSIONS = [
@@ -62,6 +64,16 @@ def check_git_tracked_files() -> list[str]:
                 for pattern, msg in FORBIDDEN_PATTERNS:
                     if pattern.search(text):
                         violations.append(f"{msg} in {rel_path}")
+
+                # 3. Check evidence files for non-synthetic / personal coordinates
+                if rel_path.startswith("evidence/") and rel_path.endswith((".json", ".md", ".csv", ".txt")):
+                    coords = re.findall(r'"latitude":\s*(-?\d+\.\d+),\s*"longitude":\s*(-?\d+\.\d+)', text)
+                    for lat_str, lon_str in coords:
+                        lat, lon = float(lat_str), float(lon_str)
+                        # Only valid geographic coordinates could be personal locations
+                        if abs(lat) <= 90.0 and abs(lon) <= 180.0:
+                            if not (12.5 <= lat <= 13.5 and 77.2 <= lon <= 78.0) and not (lat == 0.0 and lon == 0.0):
+                                violations.append(f"Non-synthetic personal coordinate ({lat}, {lon}) detected in {rel_path}")
             except Exception:
                 pass
 

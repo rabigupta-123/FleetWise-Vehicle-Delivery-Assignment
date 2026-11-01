@@ -58,7 +58,7 @@ sequenceDiagram
     Dispatcher->>API: POST /deliveries/{id}/assign (Idempotency-Key, If-Match)
     API->>Engine: Validate Request & Headers
     Engine->>DB: BEGIN IMMEDIATE
-    Note over DB: Locks write-lock exclusively; re-reads delivery, vehicle, driver states
+    Note over DB: Locks write-lock exclusively - re-reads delivery, vehicle, driver states
     DB-->>Engine: Current Resource States
     alt Any resource occupied or delivery not pending
         Engine->>DB: ROLLBACK
@@ -289,6 +289,7 @@ The following routes are generated directly from the running FastAPI application
 | `GET` | `/analytics/summary` | Yes | `ops_lead` | Operational endpoint |
 | `GET` | `/analytics/telemetry` | Yes | `ops_lead` | Aggregated telemetry volume, quality distribution, and kinematics statistics. |
 | `GET` | `/analytics/vehicles/{vehicle_id}` | Yes | `fleet_manager, ops_lead` | Detailed operational metrics and telemetry stats for a single vehicle. |
+| `GET` | `/api/driver/session` | Yes | `ops_lead` | Returns authenticated driver profile, active vehicle/delivery assignment, |
 | `GET` | `/api/pairing-tokens` | Yes | `ops_lead` | Lists recent pairing tokens and their binding status. |
 | `POST` | `/api/pairing-tokens` | Yes | `ops_lead` | Generates a >=128 bit cryptographic pairing token for phone driver telemetry access. |
 | `POST` | `/api/pairing-tokens/{token}/revoke` | Yes | `ops_lead` | Revokes a phone pairing token. |
@@ -331,10 +332,12 @@ The following routes are generated directly from the running FastAPI application
 | `POST` | `/import/{entity}` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/metrics` | Yes | `ops_lead` | Operational endpoint |
 | `GET` | `/network-info` | Yes | `ops_lead` | Operational endpoint |
+| `GET` | `/ping` | Yes | `ops_lead` | Public pre-flight reachability probe for smartphone browsers before pairing. |
 | `GET` | `/probe` | No | `Public` | Operational endpoint |
 | `POST` | `/probe/report` | No | `Public` | Stores client device capability and battery diagnostics probe report. |
 | `GET` | `/system/host-power` | Yes | `ops_lead` | Returns server host physical power telemetry (Win32 kernel GetSystemPowerStatus / psutil). |
 | `GET` | `/tracking/deliveries/{delivery_id}/latest` | Yes | `dispatcher, ops_lead` | Operational endpoint |
+| `GET` | `/tracking/drivers/live` | Yes | `fleet_manager, ops_lead` | Returns real-time fleet overview of ALL drivers with their latest phone GPS fix, |
 | `GET` | `/tracking/drivers/{driver_id}/latest` | Yes | `fleet_manager, ops_lead` | Operational endpoint |
 | `GET` | `/tracking/history` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |
 | `POST` | `/tracking/location` | Yes | `dispatcher, fleet_manager, ops_lead` | Operational endpoint |

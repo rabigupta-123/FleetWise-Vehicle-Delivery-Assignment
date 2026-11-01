@@ -79,6 +79,10 @@ def get_worked_examples() -> dict[str, Any]:
         calculate_position_confidence,
         check_geofence_arrival,
         calculate_eta_and_progress,
+        calculate_accuracy_score,
+        calculate_sigma_pos,
+        calculate_95pct_radius,
+        get_accuracy_quality_label,
     )
     proj_x, proj_y = equirectangular_project(lat2, lon2, lat1, lon1)
     kf_ex = KalmanFilter2D(init_x=0.0, init_y=0.0, init_accuracy=10.0)
@@ -90,6 +94,14 @@ def get_worked_examples() -> dict[str, Any]:
         lat2, lon2, lat2, lon2, sigma_pos=sig_pos, radius_m=50.0, sustained_seconds=25.0
     )
     eta_res = calculate_eta_and_progress(lat1, lon1, lat2, lon2, lat1, lon1, [35.0, 40.0], sigma_pos=sig_pos)
+
+    # 8. GPS Accuracy & Position Confidence Worked Example (accuracy 76.0m)
+    acc_ex = 76.0
+    acc_score_ex = calculate_accuracy_score(acc_ex)
+    acc_sigma_ex = calculate_sigma_pos(acc_ex)
+    acc_label_ex = get_accuracy_quality_label(acc_ex)
+    acc_95_ex = calculate_95pct_radius(acc_sigma_ex)
+    acc_cpos_50_ex = calculate_position_confidence(acc_sigma_ex, 50.0)
 
     return {
         "haversine_meters": hav_m_rounded,
@@ -111,6 +123,14 @@ def get_worked_examples() -> dict[str, Any]:
             "freshness_quality": telem_acc["component_scores"].get("freshness"),
             "movement_quality": telem_acc["component_scores"].get("movement_consistency"),
             "completeness_quality": telem_acc["component_scores"].get("data_completeness"),
+        },
+        "accuracy_worked_example": {
+            "raw_accuracy_m": acc_ex,
+            "quality_label": acc_label_ex,
+            "quality_score_S": acc_score_ex,
+            "sigma_m": round(acc_sigma_ex, 1),
+            "radius_95pct_m": acc_95_ex,
+            "confidence_within_50m_pct": round(acc_cpos_50_ex * 100, 1),
         },
         "gps_pipeline": {
             "projected_x_m": round(proj_x, 2),

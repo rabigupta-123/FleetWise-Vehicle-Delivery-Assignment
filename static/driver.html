@@ -219,7 +219,11 @@
         <div id="stream-status" class="live-chip">STANDBY</div>
       </div>
 
-      <div style="font-size: 13px; color: #94A3B8; margin-bottom: 8px;">
+      <div id="driver-identity-banner" style="font-size: 15px; font-weight: 600; color: #38BDF8; margin-bottom: 6px;">
+        You are <span id="driver-name-display">Authorized Fleet Driver</span>
+      </div>
+
+      <div style="font-size: 12px; color: #94A3B8; margin-bottom: 10px;">
         Driver Token: <span id="token-display" style="font-family: monospace; color: #C084FC;">Checking...</span>
       </div>
 
@@ -277,13 +281,51 @@
     let lastFix = null;
     let bufferedFixes = [];
 
+    let activeDriverName = "Authorized Fleet Driver";
+    let activeDriverId = null;
+    let activeSessionId = "TRK-DRIVER-MOBILE";
+    let activeVehicleId = null;
+    let activeVehicleReg = null;
+    let activeDeliveryId = null;
+    let isDemoDriver = false;
+
     // Parse Pairing Token from URL
     const urlParams = new URLSearchParams(window.location.search);
     pairingToken = urlParams.get("pair") || urlParams.get("token");
 
     const tokenDisplay = document.getElementById("token-display");
     if (pairingToken) {
-      tokenDisplay.textContent = pairingToken.substring(0, 10) + "...";
+      tokenDisplay.textContent = pairingToken.substring(0, 10) + "... (Validating)";
+      // Fetch paired driver profile and tracking session
+      fetch(`/api/driver/session?pair=${encodeURIComponent(pairingToken)}`, {
+        headers: { "x-device-id": deviceId }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "ok") {
+          activeDriverId = data.driver_id;
+          activeDriverName = data.driver_name;
+          activeSessionId = data.session_id || "TRK-DRIVER-MOBILE";
+          activeVehicleId = data.vehicle_id;
+          activeVehicleReg = data.vehicle_reg;
+          activeDeliveryId = data.delivery_id;
+          isDemoDriver = Boolean(data.is_demo);
+
+          const nameDisp = document.getElementById("driver-name-display");
+          if (nameDisp) {
+            let label = activeDriverName;
+            if (activeVehicleReg) label += ` [Vehicle: ${activeVehicleReg}]`;
+            nameDisp.textContent = label;
+          }
+          tokenDisplay.textContent = pairingToken.substring(0, 10) + "... (Active)";
+        } else {
+          document.getElementById("token-error-msg").textContent = data.message || "Invalid or expired token.";
+          document.getElementById("token-error").style.display = "block";
+        }
+      })
+      .catch(err => {
+        console.warn("Session check fallback:", err);
+      });
     } else {
       tokenDisplay.textContent = "NO TOKEN DETECTED";
       document.getElementById("token-error").style.display = "block";
@@ -395,24 +437,37 @@
       const acc = crd.accuracy;
       document.getElementById("acc-val").textContent = "±" + acc.toFixed(1) + "m";
 
-      // Accuracy Quality Tier
+      // 1. Raw Reported Accuracy Tiers (uncapped)
+      // Excellent <=5 m, Good <=15 m, Fair <=50 m, Poor <=100 m, Very poor >100 m
+      let accTier = "Very poor";
+      let tierClass = "quality-poor";
+      if (acc <= 5) { accTier = "Excellent"; tierClass = "quality-excellent"; }
+      else if (acc <= 15) { accTier = "Good"; tierClass = "quality-good"; }
+      else if (acc <= 50) { accTier = "Fair"; tierClass = "quality-fair"; }
+      else if (acc <= 100) { accTier = "Poor"; tierClass = "quality-poor"; }
+
+      // 2. Separate Quality Score S = 100 * exp(-acc / 50)
+      const scoreS = Math.min(100, Math.max(0, 100 * Math.exp(-acc / 50))).toFixed(1);
+
+      // 3. Sigma and 95% radius (p = 0.68 assumption: divisor = 1.5096)
+      const sigmaPos = acc / 1.509592;
+      const r95 = (sigmaPos * 2.447747).toFixed(1);
+
+      // 4. Position Confidence at geofence radius (50m): C_pos(50) = 1 - exp(-50^2 / (2 * sigma^2))
+      const cPos50 = Math.round((1 - Math.exp(- (50 * 50) / (2 * sigmaPos * sigmaPos))) * 100);
+
       const accBadge = document.getElementById("acc-badge");
-      if (acc <= 5) {
-        accBadge.innerHTML = '<span class="quality-pill quality-excellent">Excellent</span>';
-      } else if (acc <= 15) {
-        accBadge.innerHTML = '<span class="quality-pill quality-good">Good</span>';
-      } else if (acc <= 50) {
-        accBadge.innerHTML = '<span class="quality-pill quality-fair">Fair</span>';
-      } else {
-        accBadge.innerHTML = '<span class="quality-pill quality-poor">Poor</span>';
-      }
+      accBadge.innerHTML = `<span class="quality-pill ${tierClass}">${accTier}</span> <span style="font-size:11px; color:#94A3B8; margin-left:4px;">Score ${scoreS}/100 • 95% r: ${r95}m • ${cPos50}% in 50m</span>`;
 
       const spdKmh = crd.speed !== null && crd.speed >= 0 ? (crd.speed * 3.6).toFixed(1) : "0.0";
       document.getElementById("spd-val").textContent = spdKmh + " km/h";
       document.getElementById("heading-val").textContent = crd.heading !== null ? "Hdg: " + crd.heading.toFixed(0) + "°" : "Hdg: --°";
 
       const payload = {
-        session_id: "TRK-DRIVER-MOBILE",
+        session_id: activeSessionId,
+        driver_id: activeDriverId,
+        vehicle_id: activeVehicleId,
+        delivery_id: activeDeliveryId,
         device_id: deviceId,
         latitude: crd.latitude,
         longitude: crd.longitude,
@@ -421,7 +476,7 @@
         altitude_accuracy: crd.altitudeAccuracy,
         speed: crd.speed,
         heading: crd.heading,
-        source: "device",
+        source: isDemoDriver ? "simulated" : "device",
         device_timestamp: new Date(pos.timestamp).toISOString(),
         battery: batteryState
       };
