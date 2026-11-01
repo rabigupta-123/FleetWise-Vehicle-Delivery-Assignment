@@ -1,144 +1,244 @@
 /* ==========================================================================
-   FleetWise Design Tokens — Single Source of Truth
-   Upgraded with Layers AI (getlayers.ai) Cinematic Spatial & Glass Aesthetics
-   Style: Cinematic Glass HUD | Spatial Depth: High | Motion: Subtle & Fluid
+   FleetWise Design Tokens — Light "White & Orange" Admin Dashboard Default
+   Vendored local WOFF2 fonts, WCAG AA >= 4.5:1 verified contrast pairs,
+   8px spacing grid, 20-28px card radii, 999px pill radii, opt-in dark mode.
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/static/fonts/PlusJakartaSans-Variable.woff2') format('woff2');
+}
 
-:root {
-  color-scheme: dark;
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/static/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+}
 
-  /* CodeAlpha Signature Tech Palette (Purple -> Indigo -> Electric Blue) */
-  --color-primary: #8B5CF6;
-  --color-primary-hover: #A855F7;
-  --color-primary-dim: rgba(139, 92, 246, 0.16);
-  --color-primary-border: rgba(139, 92, 246, 0.42);
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Core Specification Palette */
+  --bg: #F6F4F1;
+  --surface: #FFFFFF;
+  --ink: #16181D;
+  --muted: #5B6270;
+  --border: #E9E5DF;
+  --orange-100: #FFEDD5;
+  --orange-500: #F97316;
+  --orange-600: #EA580C;
+  --orange-700: #C2410C;
+  --dark-card: #14161B;
+  --dark-card-muted: #CBD5E1;
+  --dark-card-border: rgba(255, 255, 255, 0.14);
+  --success: #15803D;
+  --danger: #B91C1C;
+  --info: #1D4ED8;
+  --warning: #B45309;
+
+  /* Contrast-Safe Semantic Mappings
+     Note: orange-500 (#F97316) on white is 2.80:1 and is strictly reserved
+     for fills, icons, and large display text. Small text on orange uses ink (#16181D, 6.34:1).
+     Text-on-orange buttons use orange-700 (#C2410C) with white (#FFFFFF, 5.18:1). */
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-card: var(--surface);
+  --color-elevated: #FAF8F5;
+  --color-foreground: var(--ink);
+  --color-card-foreground: var(--ink);
+
+  --color-muted: #EFECE6;
+  --color-muted-foreground: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: #D5CFC6;
+
+  --color-primary: var(--orange-700);
+  --color-primary-fill: var(--orange-500);
+  --color-primary-hover: #9A3412;
+  --color-primary-dim: var(--orange-100);
+  --color-primary-border: #FDBA74;
   --color-on-primary: #FFFFFF;
 
-  --color-secondary: #3B82F6;
-  --color-secondary-dim: rgba(59, 130, 246, 0.16);
-  --color-on-secondary: #FFFFFF;
+  --color-secondary: #EFECE6;
+  --color-secondary-dim: #F6F4F1;
+  --color-on-secondary: var(--ink);
 
-  --color-accent: #6366F1;
-  --color-accent-dim: rgba(99, 102, 241, 0.16);
+  --color-accent: var(--orange-700);
+  --color-accent-dim: var(--orange-100);
   --color-on-accent: #FFFFFF;
 
-  --color-cyan: #06B6D4;
-  --color-cyan-dim: rgba(6, 182, 212, 0.16);
-
-  /* CodeAlpha Deep Obsidian Background & Glass Surfaces */
-  --color-background: #0B0F19;
-  --color-surface: rgba(15, 23, 42, 0.82);
-  --color-card: rgba(17, 24, 39, 0.74);
-  --color-elevated: rgba(30, 41, 59, 0.84);
-  --color-foreground: #F8FAFC;
-  --color-card-foreground: #F1F5F9;
-
-  --color-muted: rgba(255, 255, 255, 0.05);
-  --color-muted-foreground: #94A3B8;
-  --color-border: rgba(148, 163, 184, 0.14);
-  --color-border-strong: rgba(148, 163, 184, 0.28);
-
-  --color-destructive: #EF4444;
+  --color-destructive: var(--danger);
   --color-on-destructive: #FFFFFF;
-  --color-ring: #8B5CF6;
+  --color-ring: var(--orange-600);
 
-  /* CodeAlpha Gradients */
-  --gradient-codealpha: linear-gradient(135deg, #A855F7 0%, #6366F1 50%, #3B82F6 100%);
-  --gradient-codealpha-text: linear-gradient(135deg, #C084FC 0%, #818CF8 50%, #60A5FA 100%);
-  --gradient-codealpha-btn: linear-gradient(135deg, #8B5CF6 0%, #6366F1 50%, #3B82F6 100%);
-  --gradient-codealpha-btn-hover: linear-gradient(135deg, #A855F7 0%, #818CF8 50%, #60A5FA 100%);
-  --gradient-codealpha-card: linear-gradient(180deg, rgba(30, 41, 59, 0.6) 0%, rgba(17, 24, 39, 0.8) 100%);
-  --gradient-card-top-border: linear-gradient(90deg, rgba(168, 85, 247, 0.8) 0%, rgba(99, 102, 241, 0.8) 50%, rgba(59, 130, 246, 0.8) 100%);
+  /* Semantic Status Colors (All >= 4.5:1 against both #FFFFFF and soft tints) */
+  --status-success-fg: var(--success);
+  --status-success-bg: #F0FDF4;
+  --status-success-border: #BBF7D0;
 
-  /* Semantic Status Colors (High-Contrast >= 4.5:1 on Dark Glass) */
-  --status-success-fg: #34D399;
-  --status-success-bg: rgba(16, 185, 129, 0.15);
-  --status-success-border: rgba(52, 211, 153, 0.4);
+  --status-info-fg: var(--info);
+  --status-info-bg: #EFF6FF;
+  --status-info-border: #BFDBFE;
 
-  --status-info-fg: #38BDF8;
-  --status-info-bg: rgba(56, 189, 248, 0.15);
-  --status-info-border: rgba(56, 189, 248, 0.4);
+  --status-warning-fg: var(--warning);
+  --status-warning-bg: #FFFBEB;
+  --status-warning-border: #FDE68A;
 
-  --status-warning-fg: #FBBF24;
-  --status-warning-bg: rgba(245, 158, 11, 0.15);
-  --status-warning-border: rgba(251, 191, 36, 0.4);
+  --status-danger-fg: var(--danger);
+  --status-danger-bg: #FEF2F2;
+  --status-danger-border: #FECACA;
 
-  --status-danger-fg: #FB7185;
-  --status-danger-bg: rgba(244, 63, 94, 0.15);
-  --status-danger-border: rgba(251, 113, 133, 0.4);
+  --status-neutral-fg: var(--muted);
+  --status-neutral-bg: #F3F1ED;
+  --status-neutral-border: #E2DDD5;
 
-  --status-neutral-fg: #CBD5E1;
-  --status-neutral-bg: rgba(148, 163, 184, 0.12);
-  --status-neutral-border: rgba(148, 163, 184, 0.3);
+  /* Typography */
+  --font-heading: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Modern Cinematic Typography */
-  --font-heading: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'Fira Code', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* 8px Spacing Grid */
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 40px;
+  --space-3xl: 48px;
 
-  /* Spacing Scale */
-  --space-xs: 2px;
-  --space-sm: 4px;
-  --space-md: 8px;
-  --space-lg: 12px;
-  --space-xl: 16px;
-  --space-2xl: 24px;
-  --space-3xl: 32px;
-
-  /* Layout Overrides */
+  /* Layout & Radii (20-28px on cards, 999px on pills) */
   --container-max: 1440px;
-  --sidebar-width: 256px;
-  --header-height: 62px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --header-height: 68px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 26px;
+  --radius-card: 24px;
+  --radius-pill: 999px;
 
-  /* Glassmorphism & Atmospheric Glows */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55);
-  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.65);
-  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.75);
-  --glow-primary: 0 0 28px -2px rgba(139, 92, 246, 0.38);
-  --glow-cyan: 0 0 32px -4px rgba(6, 182, 212, 0.32);
-  --glow-violet: 0 0 32px -4px rgba(168, 85, 247, 0.36);
-  --glow-codealpha: 0 8px 30px -4px rgba(139, 92, 246, 0.45);
-  --glass-blur: blur(18px);
-  --card-glass: rgba(17, 24, 39, 0.74);
-  --card-border: 1px solid rgba(148, 163, 184, 0.12);
+  /* Layered Soft Shadows */
+  --shadow-sm: 0 1px 2px rgba(22, 24, 29, 0.04), 0 2px 6px rgba(22, 24, 29, 0.03);
+  --shadow-md: 0 4px 12px -2px rgba(22, 24, 29, 0.06), 0 2px 6px -1px rgba(22, 24, 29, 0.04);
+  --shadow-lg: 0 12px 28px -6px rgba(22, 24, 29, 0.08), 0 4px 12px -2px rgba(22, 24, 29, 0.04);
+  --shadow-xl: 0 20px 40px -10px rgba(22, 24, 29, 0.12), 0 8px 16px -4px rgba(22, 24, 29, 0.05);
+  --shadow-orange: 0 10px 26px -6px rgba(234, 88, 12, 0.28), 0 4px 10px -2px rgba(249, 115, 22, 0.16);
 
   /* Motion */
   --transition-fast: 160ms cubic-bezier(0.22, 1, 0.36, 1);
   --transition-base: 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-[data-theme="light"] {
-  color-scheme: light;
-  --color-primary: #0284C7;
-  --color-primary-dim: rgba(2, 132, 199, 0.12);
-  --color-primary-border: rgba(2, 132, 199, 0.4);
+/* Opt-in Dark Theme */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0F1115;
+  --surface: #14161B;
+  --ink: #F8FAFC;
+  --muted: #94A3B8;
+  --border: #262A34;
+  --orange-100: rgba(249, 115, 22, 0.16);
+  --orange-500: #F97316;
+  --orange-600: #EA580C;
+  --orange-700: #C2410C;
+  --dark-card: #1C1F26;
+
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-card: var(--surface);
+  --color-elevated: #1C1F26;
+  --color-foreground: var(--ink);
+  --color-card-foreground: var(--ink);
+
+  --color-muted: #1E222B;
+  --color-muted-foreground: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: #373D4B;
+
+  --color-primary: var(--orange-500);
+  --color-primary-fill: var(--orange-500);
+  --color-primary-hover: var(--orange-600);
+  --color-primary-dim: rgba(249, 115, 22, 0.16);
+  --color-primary-border: rgba(249, 115, 22, 0.4);
   --color-on-primary: #FFFFFF;
-  --color-secondary: #4F46E5;
-  --color-on-secondary: #FFFFFF;
-  --color-accent: #7C3AED;
+
+  --color-secondary: #1E222B;
+  --color-secondary-dim: #14161B;
+  --color-on-secondary: var(--ink);
+
+  --color-accent: var(--orange-500);
+  --color-accent-dim: rgba(249, 115, 22, 0.16);
   --color-on-accent: #FFFFFF;
-  --color-background: #F8FAFC;
-  --color-surface: rgba(255, 255, 255, 0.9);
-  --color-card: rgba(241, 245, 249, 0.85);
-  --color-elevated: #E2E8F0;
-  --color-foreground: #0F172A;
-  --color-card-foreground: #0F172A;
-  --color-muted: #E2E8F0;
-  --color-muted-foreground: #64748B;
-  --color-border: #CBD5E1;
-  --color-border-strong: #94A3B8;
-  --color-ring: #0284C7;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 14px 32px rgba(0, 0, 0, 0.12);
-  --glow-primary: 0 0 20px rgba(2, 132, 199, 0.2);
+
+  --status-success-fg: #4ADE80;
+  --status-success-bg: rgba(21, 128, 61, 0.2);
+  --status-success-border: rgba(74, 222, 128, 0.35);
+
+  --status-info-fg: #60A5FA;
+  --status-info-bg: rgba(29, 78, 216, 0.2);
+  --status-info-border: rgba(96, 165, 250, 0.35);
+
+  --status-warning-fg: #FBBF24;
+  --status-warning-bg: rgba(180, 83, 9, 0.2);
+  --status-warning-border: rgba(251, 191, 36, 0.35);
+
+  --status-danger-fg: #F87171;
+  --status-danger-bg: rgba(185, 28, 28, 0.2);
+  --status-danger-border: rgba(248, 113, 113, 0.35);
+
+  --status-neutral-fg: #CBD5E1;
+  --status-neutral-bg: rgba(148, 163, 184, 0.14);
+  --status-neutral-border: rgba(148, 163, 184, 0.3);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.65);
+  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.75);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0F1115;
+    --surface: #14161B;
+    --ink: #F8FAFC;
+    --muted: #94A3B8;
+    --border: #262A34;
+    --orange-100: rgba(249, 115, 22, 0.16);
+    --color-background: var(--bg);
+    --color-surface: var(--surface);
+    --color-card: var(--surface);
+    --color-elevated: #1C1F26;
+    --color-foreground: var(--ink);
+    --color-card-foreground: var(--ink);
+    --color-muted: #1E222B;
+    --color-muted-foreground: var(--muted);
+    --color-border: var(--border);
+    --color-border-strong: #373D4B;
+    --color-primary: var(--orange-500);
+    --color-secondary: #1E222B;
+    --color-on-secondary: var(--ink);
+    --status-success-fg: #4ADE80;
+    --status-success-bg: rgba(21, 128, 61, 0.2);
+    --status-success-border: rgba(74, 222, 128, 0.35);
+    --status-info-fg: #60A5FA;
+    --status-info-bg: rgba(29, 78, 216, 0.2);
+    --status-info-border: rgba(96, 165, 250, 0.35);
+    --status-warning-fg: #FBBF24;
+    --status-warning-bg: rgba(180, 83, 9, 0.2);
+    --status-warning-border: rgba(251, 191, 36, 0.35);
+    --status-danger-fg: #F87171;
+    --status-danger-bg: rgba(185, 28, 28, 0.2);
+    --status-danger-border: rgba(248, 113, 113, 0.35);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
