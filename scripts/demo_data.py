@@ -35,41 +35,25 @@ def load_demo_data(center_lat: float = DEMO_CENTER_LAT, center_lon: float = DEMO
     now = datetime.now(UTC)
     now_iso = now.isoformat()
 
-    with immediate_transaction() as conn:
-        # Check idempotency: if demo data is already loaded, return existing counts immediately
-        demo_v = conn.execute("SELECT COUNT(*) FROM vehicles WHERE is_demo = 1").fetchone()[0]
-        demo_dr = conn.execute("SELECT COUNT(*) FROM drivers WHERE is_demo = 1").fetchone()[0]
-        demo_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE is_demo = 1").fetchone()[0]
-        if demo_v > 0 or demo_dr > 0 or demo_del > 0:
-            return {
-                "status": "already_loaded",
-                "counts": {
-                    "vehicles": demo_v,
-                    "drivers": demo_dr,
-                    "deliveries": demo_del,
-                },
-                "center": {"latitude": center_lat, "longitude": center_lon},
-            }
-
-        # 12 Vehicles across 4 classes
-        demo_vehicles = [
-            # 3 Bikes
-            ("V-DEMO-B01", "KA-01-DM-1001", "bike", 30, "available"),
-            ("V-DEMO-B02", "KA-01-DM-1002", "bike", 40, "available"),
-            ("V-DEMO-B03", "KA-01-DM-1003", "bike", 50, "maintenance"),
-            # 4 Vans
-            ("V-DEMO-V01", "KA-02-DM-2001", "van", 900, "available"),
-            ("V-DEMO-V02", "KA-02-DM-2002", "van", 1100, "available"),
-            ("V-DEMO-V03", "KA-02-DM-2003", "van", 1250, "assigned"),
-            ("V-DEMO-V04", "KA-02-DM-2004", "van", 1400, "available"),
-            # 3 Mini-trucks
-            ("V-DEMO-M01", "KA-03-DM-3001", "mini-truck", 2200, "available"),
-            ("V-DEMO-M02", "KA-03-DM-3002", "mini-truck", 2800, "assigned"),
-            ("V-DEMO-M03", "KA-03-DM-3003", "mini-truck", 3200, "available"),
-            # 2 Heavy Trucks
-            ("V-DEMO-T01", "KA-04-DM-4001", "truck", 8500, "available"),
-            ("V-DEMO-T02", "KA-04-DM-4002", "truck", 12000, "maintenance"),
-        ]
+    # 12 Vehicles across 4 classes
+    demo_vehicles = [
+        # 3 Bikes
+        ("V-DEMO-B01", "KA-01-DM-1001", "bike", 30, "available"),
+        ("V-DEMO-B02", "KA-01-DM-1002", "bike", 40, "available"),
+        ("V-DEMO-B03", "KA-01-DM-1003", "bike", 50, "maintenance"),
+        # 4 Vans
+        ("V-DEMO-V01", "KA-02-DM-2001", "van", 900, "available"),
+        ("V-DEMO-V02", "KA-02-DM-2002", "van", 1100, "available"),
+        ("V-DEMO-V03", "KA-02-DM-2003", "van", 1250, "assigned"),
+        ("V-DEMO-V04", "KA-02-DM-2004", "van", 1400, "available"),
+        # 3 Mini-trucks
+        ("V-DEMO-M01", "KA-03-DM-3001", "mini-truck", 2200, "available"),
+        ("V-DEMO-M02", "KA-03-DM-3002", "mini-truck", 2800, "assigned"),
+        ("V-DEMO-M03", "KA-03-DM-3003", "mini-truck", 3200, "available"),
+        # 2 Heavy Trucks
+        ("V-DEMO-T01", "KA-04-DM-4001", "truck", 8500, "available"),
+        ("V-DEMO-T02", "KA-04-DM-4002", "truck", 12000, "maintenance"),
+    ]
 
     # 15 Drivers with synthetic names and fake numbers
     demo_drivers = [
@@ -95,6 +79,21 @@ def load_demo_data(center_lat: float = DEMO_CENTER_LAT, center_lon: float = DEMO
     capacities = [25, 35, 200, 500, 850, 1100, 2400, 7500]
 
     with immediate_transaction() as conn:
+        # Check idempotency: if demo data is already loaded, return existing counts immediately
+        demo_v = conn.execute("SELECT COUNT(*) FROM vehicles WHERE is_demo = 1").fetchone()[0]
+        demo_dr = conn.execute("SELECT COUNT(*) FROM drivers WHERE is_demo = 1").fetchone()[0]
+        demo_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE is_demo = 1").fetchone()[0]
+        if demo_v > 0 or demo_dr > 0 or demo_del > 0:
+            return {
+                "status": "already_loaded",
+                "counts": {
+                    "vehicles": demo_v,
+                    "drivers": demo_dr,
+                    "deliveries": demo_del,
+                },
+                "center": {"latitude": center_lat, "longitude": center_lon},
+            }
+
         # Insert Vehicles
         for vid, reg, vtype, cap, st in demo_vehicles:
             conn.execute(
