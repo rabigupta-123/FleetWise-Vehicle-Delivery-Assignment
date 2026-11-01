@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > **IT HAPPENS @ RAALE #13 (Logistics Competition)**  
-> Production-grade, mathematically verified, conflict-free fleet dispatch and delivery allocation engine. Built with strict SQLite `BEGIN IMMEDIATE` transaction serialization, append-only audit triggers, zero-CDN local asset vendoring (local Leaflet & Lucide SVGs), dark control-room HUD inspired by Layers AI, automated Smart Dispatch Advisory, and verifiable physical smartphone GPS telemetry tracking under a strict Truthfulness Contract.
+> Production-grade, mathematically verified, conflict-free fleet dispatch and delivery allocation engine. Built with strict SQLite `BEGIN IMMEDIATE` transaction serialization, append-only audit triggers, zero-CDN local asset vendoring (local Leaflet, WOFF2 fonts & Lucide SVGs), modern white-and-orange admin dashboard with opt-in dark mode, automated Smart Dispatch Advisory, and verifiable physical smartphone GPS telemetry tracking under a strict Truthfulness Contract.
 
 ---
 
@@ -138,17 +138,17 @@ erDiagram
 
 ## 📸 Visual Tour
 
-| Command Center (Telemetry & 4-Lane Board) | Dispatch Console (Atomic Assignment) |
+| Dashboard Bento Grid (1440px) | Deliveries Table & Kanban (1440px) |
 |---|---|
-| ![Command Center Dashboard](evidence/screenshots_v2/03_dashboard_populated.png) | ![Dispatch Console](evidence/screenshots_v2/04_successful_assignment.png) |
+| ![Dashboard 1440px](evidence/screenshots_v8/dashboard_1440.png) | ![Deliveries 1440px](evidence/screenshots_v8/deliveries_1440.png) |
 
-| Smart Dispatch Advisor & Blocked Queue | Parallel Allocation Race Lab (50 Workers) |
+| Dispatch Console & Advisor Score Bars (1440px) | Live Fleet GPS Map & Telemetry (1440px) |
 |---|---|
-| ![Smart Advisor & Blocked Queue](evidence/screenshots_v2/09_smart_advisor_and_blocked_queue.png) | ![Race Lab Diagnostic](evidence/screenshots_v2/10_race_lab_diagnostic_proof.png) |
+| ![Dispatch Console 1440px](evidence/screenshots_v8/dispatch_1440.png) | ![Live Map 1440px](evidence/screenshots_v8/live_map_1440.png) |
 
-| Analytics Radar & Route Canvas | 2-Phase Import Pipeline (Dry-Run & Commit) |
+| Mobile Dashboard & Bottom Nav (375px) | Mobile Driver Portal (375px) |
 |---|---|
-| ![Analytics & Route Radar](evidence/screenshots_v2/11_analytics_and_routes.png) | ![Import Pipeline](evidence/screenshots_v2/02_import_page.png) |
+| ![Dashboard 375px](evidence/screenshots_v8/dashboard_375.png) | ![Driver Portal 375px](evidence/screenshots_v8/driver_portal_375.png) |
 
 ---
 
@@ -289,9 +289,11 @@ The following routes are generated directly from the running FastAPI application
 | `GET` | `/analytics/summary` | Yes | `ops_lead` | Operational endpoint |
 | `GET` | `/analytics/telemetry` | Yes | `ops_lead` | Aggregated telemetry volume, quality distribution, and kinematics statistics. |
 | `GET` | `/analytics/vehicles/{vehicle_id}` | Yes | `fleet_manager, ops_lead` | Detailed operational metrics and telemetry stats for a single vehicle. |
+| `GET` | `/api/csrf-token` | Yes | `ops_lead` | Issues or returns a per-session CSRF token for state-changing admin routes. |
 | `GET` | `/api/driver/session` | Yes | `ops_lead` | Returns authenticated driver profile, active vehicle/delivery assignment, |
 | `GET` | `/api/pairing-tokens` | Yes | `ops_lead` | Lists recent pairing tokens and their binding status. |
 | `POST` | `/api/pairing-tokens` | Yes | `ops_lead` | Generates a >=128 bit cryptographic pairing token for phone driver telemetry access. |
+| `POST` | `/api/pairing-tokens/revoke-all` | Yes | `ops_lead` | Revokes all pairing tokens and driver sessions. |
 | `POST` | `/api/pairing-tokens/{token}/revoke` | Yes | `ops_lead` | Revokes a phone pairing token. |
 | `GET` | `/audit` | Yes | `ops_lead` | Operational endpoint |
 | `POST` | `/auth/login` | No | `Public` | Operational endpoint |
