@@ -99,7 +99,11 @@ def check_tls_sans(ip: str) -> tuple[bool, list[str]]:
         cert_data = cert_path.read_bytes()
         cert = x509.load_pem_x509_certificate(cert_data)
         san_ext = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-        sans = [str(x.value) for x in san_ext.value]
+        san_val = san_ext.value
+        if isinstance(san_val, x509.SubjectAlternativeName):
+            sans = [str(x.value) for x in san_val]
+        else:
+            sans = []
         has_ip = ip in sans
         return has_ip, sans
     except Exception:
@@ -213,3 +217,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

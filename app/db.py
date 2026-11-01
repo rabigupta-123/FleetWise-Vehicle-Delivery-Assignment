@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS vehicles (
     type TEXT NOT NULL,
     capacity INTEGER NOT NULL CHECK (capacity > 0),
     status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'assigned', 'maintenance', 'inactive')),
-    is_demo INTEGER NOT NULL DEFAULT 0
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    demo_key TEXT UNIQUE NULL
 );
 
 CREATE TABLE IF NOT EXISTS drivers (
@@ -27,12 +28,13 @@ CREATE TABLE IF NOT EXISTS drivers (
     phone_carrier TEXT NULL,
     phone_country_code TEXT NULL,
     availability_status TEXT NOT NULL DEFAULT 'available' CHECK (availability_status IN ('available', 'assigned', 'unavailable')),
-    is_demo INTEGER NOT NULL DEFAULT 0
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    demo_key TEXT UNIQUE NULL
 );
 
 CREATE TABLE IF NOT EXISTS devices (
     device_id TEXT PRIMARY KEY,
-    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id) ON DELETE CASCADE,
     nickname TEXT NOT NULL,
     device_category TEXT NULL,
     model TEXT NULL,
@@ -57,13 +59,24 @@ CREATE INDEX IF NOT EXISTS idx_devices_driver ON devices(driver_id);
 
 CREATE TABLE IF NOT EXISTS phone_pairing_tokens (
     token TEXT PRIMARY KEY,
-    driver_id TEXT NULL,
+    driver_id TEXT NULL REFERENCES drivers(driver_id) ON DELETE CASCADE,
+    device_id TEXT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0,
+    revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_phone_pairing_tokens_tok ON phone_pairing_tokens(token);
+
+CREATE TABLE IF NOT EXISTS driver_sessions (
+    session_token_hash TEXT PRIMARY KEY,
+    driver_id TEXT NULL REFERENCES drivers(driver_id) ON DELETE CASCADE,
     device_id TEXT NULL,
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     revoked INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_phone_pairing_tokens_tok ON phone_pairing_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_driver_sessions_hash ON driver_sessions(session_token_hash);
 
 CREATE TABLE IF NOT EXISTS deliveries (
     delivery_id TEXT PRIMARY KEY,
@@ -79,14 +92,15 @@ CREATE TABLE IF NOT EXISTS deliveries (
     pickup_lng REAL NULL,
     drop_lat REAL NULL,
     drop_lng REAL NULL,
-    is_demo INTEGER NOT NULL DEFAULT 0
+    is_demo INTEGER NOT NULL DEFAULT 0,
+    demo_key TEXT UNIQUE NULL
 );
 
 CREATE TABLE IF NOT EXISTS assignments (
     assignment_id TEXT PRIMARY KEY,
-    delivery_id TEXT NOT NULL REFERENCES deliveries(delivery_id),
-    vehicle_id TEXT NOT NULL REFERENCES vehicles(vehicle_id),
-    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
+    delivery_id TEXT NOT NULL REFERENCES deliveries(delivery_id) ON DELETE CASCADE,
+    vehicle_id TEXT NOT NULL REFERENCES vehicles(vehicle_id) ON DELETE CASCADE,
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id) ON DELETE CASCADE,
     assigned_at TEXT NOT NULL,
     released_at TEXT NULL,
     release_reason TEXT NULL
@@ -143,10 +157,10 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 
 CREATE TABLE IF NOT EXISTS tracking_sessions (
     session_id TEXT PRIMARY KEY,
-    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
-    device_id TEXT NULL REFERENCES devices(device_id),
-    vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id),
-    delivery_id TEXT NULL REFERENCES deliveries(delivery_id),
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id) ON DELETE CASCADE,
+    device_id TEXT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+    vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id) ON DELETE CASCADE,
+    delivery_id TEXT NULL REFERENCES deliveries(delivery_id) ON DELETE CASCADE,
     device_info TEXT NULL,
     started_at TEXT NOT NULL,
     stopped_at TEXT NULL,
@@ -158,11 +172,11 @@ CREATE TABLE IF NOT EXISTS tracking_sessions (
 
 CREATE TABLE IF NOT EXISTS gps_locations (
     location_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES tracking_sessions(session_id),
-    driver_id TEXT NOT NULL REFERENCES drivers(driver_id),
-    device_id TEXT NULL REFERENCES devices(device_id),
-    vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id),
-    delivery_id TEXT NULL REFERENCES deliveries(delivery_id),
+    session_id TEXT NOT NULL REFERENCES tracking_sessions(session_id) ON DELETE CASCADE,
+    driver_id TEXT NOT NULL REFERENCES drivers(driver_id) ON DELETE CASCADE,
+    device_id TEXT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+    vehicle_id TEXT NULL REFERENCES vehicles(vehicle_id) ON DELETE CASCADE,
+    delivery_id TEXT NULL REFERENCES deliveries(delivery_id) ON DELETE CASCADE,
     latitude REAL NOT NULL CHECK (latitude >= -90.0 AND latitude <= 90.0),
     longitude REAL NOT NULL CHECK (longitude >= -180.0 AND longitude <= 180.0),
     accuracy REAL NOT NULL CHECK (accuracy >= 0),
@@ -187,7 +201,8 @@ CREATE TABLE IF NOT EXISTS gps_locations (
     is_gated INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT 'device' CHECK (source IN ('device', 'simulated')),
     kalman_sigma_pos REAL NULL,
-    mahalanobis_d2 REAL NULL
+    mahalanobis_d2 REAL NULL,
+    is_demo INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_gps_driver_ts ON gps_locations(driver_id, server_timestamp DESC);
@@ -206,12 +221,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_assignments_active_delivery
 """
 
 
-def get_connection(db_path: str | None = None) -> sqlite3.Connection:
-    path = db_path or get_db_path()
-    conn = sqlite3.connect(path, timeout=30.0, isolation_level=None, check_same_thread=False)
+def _on_connect_pragma_hook(conn: sqlite3.Connection) -> None:
+    """Connection event hook ensuring foreign_keys=ON on every SQLite connection."""
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA busy_timeout = 30000;")
+    fk_active = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
+    if fk_active != 1:
+        raise RuntimeError("Failed to enable PRAGMA foreign_keys=ON on SQLite connection")
+
+
+_CONNECTION_HOOKS = [_on_connect_pragma_hook]
+
+
+def register_connection_hook(hook_fn) -> None:
+    if hook_fn not in _CONNECTION_HOOKS:
+        _CONNECTION_HOOKS.append(hook_fn)
+
+
+def get_connection(db_path: str | None = None) -> sqlite3.Connection:
+    path = db_path or get_db_path()
+    conn = sqlite3.connect(path, timeout=30.0, isolation_level=None, check_same_thread=False)
+    for hook in _CONNECTION_HOOKS:
+        hook(conn)
     return conn
 
 
@@ -220,10 +252,84 @@ def init_db(db_path: str | None = None) -> None:
     try:
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.executescript(SCHEMA_SQL)
-        # Migrate existing tables if columns are missing
+        # Migrate existing tables if columns or foreign key cascades are missing
         _migrate_columns(conn)
+        _migrate_cascade_foreign_keys(conn)
     finally:
         conn.close()
+
+
+def _migrate_cascade_foreign_keys(conn: sqlite3.Connection) -> None:
+    """Migrates existing child tables to include ON DELETE CASCADE on foreign keys."""
+    import re
+    child_tables = ["devices", "phone_pairing_tokens", "assignments", "tracking_sessions", "gps_locations"]
+    for tbl in child_tables:
+        fks = conn.execute(f"PRAGMA foreign_key_list({tbl})").fetchall()
+        has_stale_ref = any("_old_fk_mig" in str(fk["table"]) for fk in fks)
+        needs_migration = (
+            has_stale_ref
+            or (tbl == "phone_pairing_tokens" and len(fks) == 0)
+            or any(fk["on_delete"].upper() != "CASCADE" for fk in fks)
+        )
+        if not needs_migration:
+            continue
+
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
+        ).fetchone()
+        if not row or not row["sql"]:
+            continue
+
+        old_sql = row["sql"]
+        # Clean up any accidental _old_fk_mig references
+        fixed_sql = re.sub(r'([a-zA-Z0-9_]+)_old_fk_mig"?', r"\1", old_sql)
+        if tbl == "phone_pairing_tokens" and "REFERENCES" not in fixed_sql.upper():
+            new_sql = fixed_sql.replace(
+                "driver_id TEXT NULL",
+                "driver_id TEXT NULL REFERENCES drivers(driver_id) ON DELETE CASCADE",
+            )
+        else:
+            new_sql = re.sub(
+                r"REFERENCES\s+\"?([a-zA-Z0-9_]+)\"?\s*\(([^)]+)\)(?!\s+ON\s+DELETE\s+CASCADE)",
+                r"REFERENCES \1(\2) ON DELETE CASCADE",
+                fixed_sql,
+                flags=re.IGNORECASE,
+            )
+
+        if new_sql == old_sql:
+            continue
+
+        # Save existing indexes on this table
+        idx_rows = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",
+            (tbl,),
+        ).fetchall()
+        saved_indexes = [r["sql"] for r in idx_rows]
+
+        conn.execute("PRAGMA foreign_keys = OFF;")
+        conn.execute("PRAGMA legacy_alter_table = ON;")
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(f"ALTER TABLE {tbl} RENAME TO {tbl}_old_fk_mig;")
+            conn.execute(new_sql)
+            cols = [c["name"] for c in conn.execute(f"PRAGMA table_info({tbl})").fetchall()]
+            old_cols = {c["name"] for c in conn.execute(f"PRAGMA table_info({tbl}_old_fk_mig)").fetchall()}
+            common_cols = [c for c in cols if c in old_cols]
+            col_csv = ", ".join(common_cols)
+            conn.execute(
+                f"INSERT OR IGNORE INTO {tbl} ({col_csv}) SELECT {col_csv} FROM {tbl}_old_fk_mig;"
+            )
+            conn.execute(f"DROP TABLE {tbl}_old_fk_mig;")
+            for idx_sql in saved_indexes:
+                conn.execute(idx_sql)
+            conn.execute("COMMIT;")
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK;")
+            raise
+        finally:
+            conn.execute("PRAGMA legacy_alter_table = OFF;")
+            conn.execute("PRAGMA foreign_keys = ON;")
 
 
 def _migrate_columns(conn: sqlite3.Connection) -> None:
@@ -235,9 +341,20 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
 
     # Demo and GPS Pipeline columns
     add_col_if_missing("vehicles", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("vehicles", "demo_key", "TEXT NULL")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_demo_key ON vehicles(demo_key);")
+
     add_col_if_missing("drivers", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("drivers", "demo_key", "TEXT NULL")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_drivers_demo_key ON drivers(demo_key);")
+
     add_col_if_missing("deliveries", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("deliveries", "demo_key", "TEXT NULL")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_demo_key ON deliveries(demo_key);")
+
     add_col_if_missing("tracking_sessions", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("gps_locations", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+    add_col_if_missing("phone_pairing_tokens", "used", "INTEGER NOT NULL DEFAULT 0")
     add_col_if_missing("gps_locations", "filtered_latitude", "REAL NULL")
     add_col_if_missing("gps_locations", "filtered_longitude", "REAL NULL")
     add_col_if_missing("gps_locations", "filtered_speed", "REAL NULL")

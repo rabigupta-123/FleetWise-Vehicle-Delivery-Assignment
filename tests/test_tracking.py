@@ -346,16 +346,16 @@ def test_three_simulated_devices_interleaved_live_tracking(client: TestClient, t
     client.post(f"/tracking/sessions/{sess_id_a}/consent", json={"consent": True})
     client.post(f"/tracking/sessions/{sess_id_b}/consent", json={"consent": True})
 
-    # 4. Security Check: Second physical device trying to use tok1 is REJECTED
+    # 4. Security Check: Second physical device trying to use tok1 is REJECTED with generic message
     rogue_res = client.get(f"/api/driver/session?pair={tok1}", headers={"x-device-id": "DEV-PHONE-ROGUE"})
     assert rogue_res.status_code == 403
-    assert "Token bound to device" in rogue_res.json()["message"]
+    assert rogue_res.json()["message"] == "Invalid or expired pairing token."
 
-    # 5. Security Check: Revoking tok3 rejects Device C
+    # 5. Security Check: Revoking tok3 rejects Device C with generic message
     revoke_pairing_token(tok3)
     revoked_res = client.get(f"/api/driver/session?pair={tok3}", headers={"x-device-id": "DEV-PHONE-C"})
     assert revoked_res.status_code == 403
-    assert "revoked" in revoked_res.json()["message"]
+    assert revoked_res.json()["message"] == "Invalid or expired pairing token."
 
     # 6. Interleaved telemetry transmission: Device A & Device B
     now_ts = "2026-11-01T04:00:00Z"
@@ -472,6 +472,114 @@ def test_tunnel_proxy_header_loopback_denial(client: TestClient, temp_db: str):
     r_health = client.get("/health", headers={"x-forwarded-for": "198.51.100.22"})
     assert r_health.status_code == 200
     assert r_health.json() == {"status": "ok"}
+
+
+def test_item3_hardened_phone_pairing_tokens(client: TestClient, temp_db: str):
+    """
+    Item 3 Verification:
+    - Tokens generated with secrets.token_urlsafe(32), stored hashed (SHA-256), single-use,
+      expire after 10 minutes, bound to one driver.
+    - First load of /driver?pair=<token> exchanges immediately for HttpOnly, Secure,
+      SameSite=Strict session cookie, strips token from URL via 303 redirect, sets
+      Referrer-Policy: no-referrer.
+    - Reuse rejected, expired rejected, wrong token rejected with 403 and identical generic
+      message (no oracle).
+    - Rate-limit token attempts per IP (10/min -> 11th returns 429).
+    - revoke_all_pairing_tokens() revokes all tokens.
+    """
+    import hashlib
+    from datetime import datetime
+
+    from app.auth import (
+        generate_pairing_token,
+        reset_pairing_rate_limits,
+        revoke_all_pairing_tokens,
+    )
+    from app.db import get_connection
+    from app.main import app
+
+    client.post("/drivers", json={"driver_id": "DR-HARDEN-1", "name": "Hardened Driver", "phone": "+91-9000022222"})
+
+    # 1. Generate token and verify it is stored hashed (SHA-256), 10-minute expiry
+    raw_tok = generate_pairing_token(driver_id="DR-HARDEN-1")
+    assert len(raw_tok) >= 40  # secrets.token_urlsafe(32) produces 43 chars
+    expected_hash = hashlib.sha256(raw_tok.encode("utf-8")).hexdigest()
+
+    conn = get_connection()
+    try:
+        # Raw token must NOT exist in DB
+        assert conn.execute("SELECT COUNT(*) FROM phone_pairing_tokens WHERE token = ?", (raw_tok,)).fetchone()[0] == 0
+        # Hash MUST exist in DB
+        row = conn.execute("SELECT * FROM phone_pairing_tokens WHERE token = ?", (expected_hash,)).fetchone()
+        assert row is not None
+        assert row["driver_id"] == "DR-HARDEN-1"
+        assert row["used"] == 0
+        assert row["revoked"] == 0
+        created_dt = datetime.fromisoformat(row["created_at"])
+        expires_dt = datetime.fromisoformat(row["expires_at"])
+        delta_min = (expires_dt - created_dt).total_seconds() / 60.0
+        assert 9.9 <= delta_min <= 10.1
+    finally:
+        conn.close()
+
+    # 2. First load exchanges immediately for HttpOnly, Secure, SameSite=Strict cookie via 303 redirect
+    remote_phone = TestClient(app, client=("192.168.1.77", 51000))
+    res_exchange = remote_phone.get(f"/driver?pair={raw_tok}", follow_redirects=False)
+    assert res_exchange.status_code == 303
+    location_hdr = res_exchange.headers.get("location", "")
+    assert "pair=" not in location_hdr
+    assert location_hdr.endswith("/driver")
+    assert res_exchange.headers.get("Referrer-Policy") == "no-referrer"
+
+    set_cookie_hdr = res_exchange.headers.get("set-cookie", "").lower()
+    assert "driver_session=" in set_cookie_hdr
+    assert "httponly" in set_cookie_hdr
+    assert "secure" in set_cookie_hdr
+    assert "samesite=strict" in set_cookie_hdr
+
+    # Following the redirect loads /driver with Referrer-Policy: no-referrer and no token in URL
+    res_portal = remote_phone.get(location_hdr)
+    assert res_portal.status_code == 200
+    assert res_portal.headers.get("Referrer-Policy") == "no-referrer"
+
+    # 3. Single-use: Reusing the same token is REJECTED with 403
+    res_reuse = remote_phone.get(f"/driver?pair={raw_tok}", follow_redirects=False)
+    assert res_reuse.status_code == 403
+
+    # 4. Expired token is REJECTED with 403
+    exp_tok = generate_pairing_token(driver_id="DR-HARDEN-1", valid_minutes=-5)
+    res_expired = remote_phone.get(f"/driver?pair={exp_tok}", follow_redirects=False)
+    assert res_expired.status_code == 403
+
+    # 5. Unknown/wrong token is REJECTED with 403
+    res_wrong = remote_phone.get("/driver?pair=example_unknown_fake_token_value_12345", follow_redirects=False)
+    assert res_wrong.status_code == 403
+
+    # Verify NO ORACLE: reuse, expired, and wrong token return the exact same error code and message
+    body_reuse = res_reuse.json()
+    body_expired = res_expired.json()
+    body_wrong = res_wrong.json()
+    assert body_reuse["error"] == body_expired["error"] == body_wrong["error"] == "FORBIDDEN"
+    assert body_reuse["message"] == body_expired["message"] == body_wrong["message"] == "Invalid or expired pairing token."
+
+    # 6. Test revoke_all_pairing_tokens()
+    tok_to_revoke = generate_pairing_token(driver_id="DR-HARDEN-1")
+    revoked_cnt = revoke_all_pairing_tokens()
+    assert revoked_cnt >= 1
+    res_after_revoke_all = remote_phone.get(f"/driver?pair={tok_to_revoke}", follow_redirects=False)
+    assert res_after_revoke_all.status_code == 403
+    assert res_after_revoke_all.json()["message"] == "Invalid or expired pairing token."
+
+    # 7. Rate-limit token attempts per IP (10/min -> 11th attempt gets 429)
+    reset_pairing_rate_limits()
+    rate_client = TestClient(app, client=("192.168.1.99", 52000))
+    for _ in range(10):
+        r_att = rate_client.get("/driver?pair=wrong_token_attempt", follow_redirects=False)
+        assert r_att.status_code == 403
+    r_11th = rate_client.get("/driver?pair=wrong_token_attempt", follow_redirects=False)
+    assert r_11th.status_code == 429
+    reset_pairing_rate_limits()
+
 
 
 

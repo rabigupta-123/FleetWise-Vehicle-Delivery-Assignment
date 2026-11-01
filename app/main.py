@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -17,9 +18,16 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Query, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 
 from app.advisor import get_dispatch_next_delivery, get_recommendations_for_delivery
@@ -39,16 +47,22 @@ from app.analytics.deep_analysis import (
     detect_operational_anomalies,
 )
 from app.auth import (
+    GENERIC_PAIRING_ERROR,
+    check_pairing_rate_limit,
     check_permission,
+    exchange_pairing_token_for_session,
     generate_pairing_token,
     get_current_user,
+    hash_token,
     is_loopback_client,
     is_share_lan_active,
+    revoke_all_pairing_tokens,
     revoke_pairing_token,
+    validate_driver_session,
     validate_pairing_token,
 )
 from app.clock import get_current_time, utc_now_iso
-from app.config import get_gps_retention_days
+from app.config import get_gps_retention_days, get_host, is_demo_routes_enabled
 from app.db import (
     get_connection,
     immediate_transaction,
@@ -93,6 +107,7 @@ from app.telematics import (
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
+logger = logging.getLogger("fleetwise")
 
 # Event bus for Server-Sent Events (SSE)
 SSE_SUBSCRIBERS: set[asyncio.Queue] = set()
@@ -114,6 +129,13 @@ async def lifespan(app: FastAPI):
     # Purge expired GPS fixes on startup
     with immediate_transaction() as conn:
         purge_old_gps_telemetry(conn, retention_days)
+
+    # Bind check: log loud startup warning if server listens on 0.0.0.0 with demo routes enabled
+    if is_demo_routes_enabled() and (get_host() == "0.0.0.0" or is_share_lan_active()):
+        logger.warning(
+            "[CRITICAL SECURITY WARNING] Server is listening on 0.0.0.0 with ENABLE_DEMO_ROUTES=true! "
+            "Destructive demo endpoints (/demo/load, /demo/clear) are exposed on the network."
+        )
 
     # Recurring background task: purge expired GPS fixes every hour
     async def _recurring_gps_purge():
@@ -165,19 +187,33 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'; "
         "img-src 'self' data: https://*.tile.openstreetmap.org https://tile.openstreetmap.org;"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if "Referrer-Policy" not in response.headers:
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
 
 @app.middleware("http")
 async def network_access_middleware(request: Request, call_next):
     path = request.url.path
+
+    # Reject pairing links on plain HTTP port 8000 (must use HTTPS port 8443)
+    if (request.query_params.get("pair") or request.query_params.get("token")) and request.url.port == 8000 and request.url.scheme == "http":
+        req_id = getattr(request.state, "request_id", None) or f"req_{secrets.token_hex(6)}"
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "FORBIDDEN",
+                "message": "Pairing links are not accepted over plain HTTP port 8000. Use HTTPS port 8443.",
+                "request_id": req_id,
+            },
+            headers={"X-Request-ID": req_id},
+        )
 
     # Public static assets, health check, ping pre-flight, and diagnostic probe
     if path in ("/health", "/ping") or path.startswith("/static") or path == "/probe" or path.startswith("/probe"):
@@ -220,6 +256,25 @@ async def network_access_middleware(request: Request, call_next):
         if path == "/probe" and request.method == "GET":
             return await call_next(request)
 
+        # If accessing /driver directly, let serve_driver_portal handle rate-limiting, single-use exchange, and session cookies
+        if path == "/driver":
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        if not check_pairing_rate_limit(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={"error": "TOO_MANY_REQUESTS", "message": "Too many token attempts. Please wait."},
+            )
+
+        # Check driver_session cookie first
+        sess_cookie = request.cookies.get("driver_session") or request.headers.get("x-driver-session")
+        device_id = request.headers.get("x-device-id") or request.query_params.get("device_id")
+        if sess_cookie:
+            sess_ok, _, _ = validate_driver_session(sess_cookie, device_id=device_id)
+            if sess_ok:
+                return await call_next(request)
+
         # Extract pairing token from query params or header
         pair_token = request.query_params.get("pair") or request.query_params.get("token")
         if not pair_token:
@@ -229,12 +284,11 @@ async def network_access_middleware(request: Request, call_next):
             else:
                 pair_token = request.headers.get("x-pairing-token")
 
-        device_id = request.headers.get("x-device-id") or request.query_params.get("device_id")
-        valid, reason = validate_pairing_token(pair_token, device_id=device_id)
+        valid, _ = validate_pairing_token(pair_token, device_id=device_id)
         if not valid:
             return JSONResponse(
                 status_code=403,
-                content={"error": "FORBIDDEN", "message": f"Phone route access rejected: {reason}"},
+                content={"error": "FORBIDDEN", "message": GENERIC_PAIRING_ERROR},
             )
         return await call_next(request)
 
@@ -252,8 +306,31 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/", include_in_schema=False)
-def serve_index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+def serve_index(request: Request):
+    resp = FileResponse(str(STATIC_DIR / "index.html"))
+    csrf_tok = request.cookies.get("csrf_token") or secrets.token_urlsafe(32)
+    resp.set_cookie(
+        key="csrf_token",
+        value=csrf_tok,
+        httponly=False,
+        samesite="strict",
+        path="/",
+    )
+    return resp
+
+
+@app.get("/api/csrf-token")
+def get_csrf_token_endpoint(request: Request, response: Response):
+    """Issues or returns a per-session CSRF token for state-changing admin routes."""
+    csrf_tok = request.cookies.get("csrf_token") or secrets.token_urlsafe(32)
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_tok,
+        httponly=False,
+        samesite="strict",
+        path="/",
+    )
+    return {"csrf_token": csrf_tok}
 
 
 @app.get("/probe", include_in_schema=False)
@@ -388,24 +465,56 @@ def get_driver_phone_session(request: Request):
     """
     Returns authenticated driver profile, active vehicle/delivery assignment,
     and active tracking session for smartphone browser upon pairing.
+    Supports both the HttpOnly driver_session cookie and pairing token.
     """
-    pair_token = request.query_params.get("pair") or request.query_params.get("token") or request.headers.get("x-pairing-token")
-    device_id = request.headers.get("x-device-id") or request.query_params.get("device_id")
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_pairing_rate_limit(client_ip):
+        raise AppError(429, "TOO_MANY_REQUESTS", "Too many token attempts. Please wait.")
 
-    valid, reason = validate_pairing_token(pair_token, device_id=device_id)
-    if not valid:
-        raise AppError(403, "FORBIDDEN", f"Invalid pairing token: {reason}")
+    device_id = request.headers.get("x-device-id") or request.query_params.get("device_id")
+    sess_cookie = request.cookies.get("driver_session") or request.headers.get("x-driver-session")
+    pair_token = (
+        request.query_params.get("pair")
+        or request.query_params.get("token")
+        or request.headers.get("x-pairing-token")
+    )
+
+    driver_id = None
+    if sess_cookie:
+        sess_ok, _, sess_driver_id = validate_driver_session(sess_cookie, device_id=device_id)
+        if not sess_ok:
+            raise AppError(403, "FORBIDDEN", GENERIC_PAIRING_ERROR)
+        driver_id = sess_driver_id
+    else:
+        valid, _ = validate_pairing_token(pair_token, device_id=device_id)
+        if not valid:
+            raise AppError(403, "FORBIDDEN", GENERIC_PAIRING_ERROR)
 
     with immediate_transaction() as conn:
-        tok_row = conn.execute("SELECT * FROM phone_pairing_tokens WHERE token = ?", (pair_token,)).fetchone()
-        driver_id = tok_row["driver_id"] if tok_row else None
+        if not driver_id and pair_token:
+            tok_hash = hash_token(pair_token)
+            tok_row = conn.execute(
+                "SELECT * FROM phone_pairing_tokens WHERE token = ?", (tok_hash,)
+            ).fetchone()
+            if tok_row:
+                driver_id = tok_row["driver_id"]
+            else:
+                sess_row_lookup = conn.execute(
+                    "SELECT * FROM driver_sessions WHERE session_token_hash = ?", (tok_hash,)
+                ).fetchone()
+                if sess_row_lookup:
+                    driver_id = sess_row_lookup["driver_id"]
 
         if not driver_id:
             # If token was generic, pick first driver
             first_drv = conn.execute("SELECT driver_id FROM drivers ORDER BY driver_id ASC LIMIT 1").fetchone()
             if first_drv:
                 driver_id = first_drv["driver_id"]
-                conn.execute("UPDATE phone_pairing_tokens SET driver_id = ? WHERE token = ?", (driver_id, pair_token))
+                if pair_token:
+                    conn.execute(
+                        "UPDATE phone_pairing_tokens SET driver_id = ? WHERE token = ?",
+                        (driver_id, hash_token(pair_token)),
+                    )
 
         drv = conn.execute("SELECT * FROM drivers WHERE driver_id = ?", (driver_id,)).fetchone() if driver_id else None
         if not drv:
@@ -465,7 +574,6 @@ def get_driver_phone_session(request: Request):
 
         return {
             "status": "ok",
-            "token": pair_token,
             "driver_id": driver_id,
             "driver_name": drv["name"],
             "phone": drv["phone"],
@@ -487,11 +595,20 @@ def list_pairing_tokens_endpoint(request: Request):
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT token, driver_id, device_id, created_at, expires_at, revoked FROM phone_pairing_tokens ORDER BY created_at DESC LIMIT 50"
+            "SELECT token, driver_id, device_id, created_at, expires_at, used, revoked FROM phone_pairing_tokens ORDER BY created_at DESC LIMIT 50"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+@app.post("/api/pairing-tokens/revoke-all")
+def revoke_all_pairing_tokens_endpoint(request: Request):
+    """Revokes all pairing tokens and driver sessions."""
+    if not is_loopback_client(request) and not is_share_lan_active():
+        raise AppError(403, "FORBIDDEN", "Revoking pairing tokens restricted to loopback dashboard.")
+    count = revoke_all_pairing_tokens()
+    return {"status": "ok", "revoked_count": count}
 
 
 @app.post("/api/pairing-tokens/{token}/revoke")
@@ -507,11 +624,56 @@ def revoke_pairing_token_endpoint(token: str, request: Request):
 
 @app.get("/driver", include_in_schema=False)
 def serve_driver_portal(request: Request):
-    """Driver mobile portal."""
+    """
+    Driver mobile portal.
+    If ?pair=<token> is present, immediately exchanges the single-use token for an
+    HttpOnly, Secure, SameSite=Strict session cookie, invalidates the token, and
+    strips the token from the URL via a 303 redirect with Referrer-Policy: no-referrer.
+    """
+    pair_token = request.query_params.get("pair") or request.query_params.get("token")
+    device_id = request.headers.get("x-device-id") or request.query_params.get("device_id")
+    client_ip = request.client.host if request.client else "unknown"
+
+    if pair_token is not None:
+        if not check_pairing_rate_limit(client_ip):
+            raise AppError(429, "TOO_MANY_REQUESTS", "Too many token attempts. Please wait.")
+
+        ok, msg, raw_session, _ = exchange_pairing_token_for_session(pair_token, device_id=device_id)
+        if not ok or not raw_session:
+            raise AppError(403, "FORBIDDEN", GENERIC_PAIRING_ERROR)
+
+        target_url = "https://testserver/driver" if request.url.hostname == "testserver" else "/driver"
+        redirect_resp = RedirectResponse(url=target_url, status_code=303)
+        redirect_resp.set_cookie(
+            key="driver_session",
+            value=raw_session,
+            httponly=True,
+            secure=True,
+            samesite="strict",
+            max_age=86400,
+            path="/",
+        )
+        redirect_resp.headers["Referrer-Policy"] = "no-referrer"
+        return redirect_resp
+
+    # No pair query param: verify session cookie (or loopback access)
+    sess_cookie = request.cookies.get("driver_session") or request.headers.get("x-driver-session")
+    has_proxy_header = any(
+        bool(request.headers.get(h))
+        for h in ("forwarded", "x-forwarded-for", "cf-connecting-ip", "cf-ray")
+    )
+    is_loopback = is_loopback_client(request) and not has_proxy_header
+
+    if sess_cookie:
+        sess_ok, _, _ = validate_driver_session(sess_cookie, device_id=device_id)
+        if not sess_ok:
+            raise AppError(403, "FORBIDDEN", GENERIC_PAIRING_ERROR)
+    elif not is_loopback:
+        raise AppError(403, "FORBIDDEN", GENERIC_PAIRING_ERROR)
+
     driver_file = STATIC_DIR / "driver.html"
-    if driver_file.exists():
-        return FileResponse(str(driver_file))
-    return FileResponse(str(STATIC_DIR / "probe.html"))
+    target_file = driver_file if driver_file.exists() else STATIC_DIR / "probe.html"
+    return FileResponse(str(target_file), headers={"Referrer-Policy": "no-referrer"})
 
 
 # -------------------------------------------------------------------------
@@ -592,9 +754,37 @@ def get_network_info():
 # -------------------------------------------------------------------------
 # DEMO DATA & SIMULATOR ENDPOINTS
 # -------------------------------------------------------------------------
+def _verify_demo_route_security(request: Request) -> None:
+    """
+    Enforces security guards for destructive demo routes (/demo/load, /demo/clear):
+    1. Route availability gated by ENABLE_DEMO_ROUTES=true (default false -> 404).
+    2. Same-origin check: Origin header (if present) must match Host header (mismatch -> 403).
+    3. Per-session CSRF token check: X-CSRF-Token header must match csrf_token cookie (missing/mismatch -> 403).
+    """
+    if not is_demo_routes_enabled():
+        raise AppError(404, "NOT_FOUND", "Demo routes are disabled.")
+
+    origin = request.headers.get("origin")
+    host = request.headers.get("host")
+    if origin and host:
+        parsed_origin = urlparse(origin)
+        if parsed_origin.netloc.lower() != host.lower():
+            raise AppError(403, "FORBIDDEN", "Cross-origin request rejected: Origin does not match Host.")
+
+    sec_fetch_site = request.headers.get("sec-fetch-site", "").lower()
+    if sec_fetch_site == "cross-site":
+        raise AppError(403, "FORBIDDEN", "Cross-origin request rejected by Sec-Fetch-Site.")
+
+    cookie_csrf = request.cookies.get("csrf_token")
+    header_csrf = request.headers.get("x-csrf-token")
+    if not cookie_csrf or not header_csrf or not secrets.compare_digest(cookie_csrf, header_csrf):
+        raise AppError(403, "FORBIDDEN", "Missing or invalid CSRF token.")
+
+
 @app.post("/demo/load")
 async def api_load_demo_data(request: Request, response: Response):
     """Loads clearly labeled demo dataset (~12 vehicles, ~15 drivers, 25 deliveries) in 1 transaction."""
+    _verify_demo_route_security(request)
     from app.config import DEMO_CENTER_LAT, DEMO_CENTER_LON
     from scripts.demo_data import load_demo_data
     center_lat = DEMO_CENTER_LAT
@@ -619,8 +809,9 @@ async def api_load_demo_data(request: Request, response: Response):
 
 
 @app.post("/demo/clear")
-def api_clear_demo_data():
+def api_clear_demo_data(request: Request):
     """Halts simulator and removes ONLY is_demo rows in 1 atomic transaction."""
+    _verify_demo_route_security(request)
     from scripts.demo_data import clear_demo_data
     res = clear_demo_data()
     broadcast_event("demo_data_cleared", res)

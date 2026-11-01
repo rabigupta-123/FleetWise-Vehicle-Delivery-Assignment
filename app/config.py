@@ -46,6 +46,12 @@ def get_gps_retention_days() -> int:
     return int(os.environ.get("GPS_RETENTION_DAYS", "30"))
 
 
+def is_demo_routes_enabled() -> bool:
+    """Feature flag for destructive demo data load/clear routes (default False)."""
+    return os.environ.get("ENABLE_DEMO_ROUTES", "false").lower() in ("true", "1", "yes")
+
+
+
 # =====================================================================
 # MAP TILE SETTINGS (Configurable in .env; all libraries vendored locally)
 # =====================================================================

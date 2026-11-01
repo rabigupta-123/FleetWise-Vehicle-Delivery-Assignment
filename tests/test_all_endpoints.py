@@ -262,9 +262,10 @@ def test_audit_all_44_endpoints_and_status_codes(client: TestClient, temp_db: st
     assert len(pair_token) >= 24
 
     # 31. GET /api/pairing-tokens -> 200, POST /api/pairing-tokens/{token}/revoke -> 200
+    from app.auth import hash_token
     r_list = client.get("/api/pairing-tokens")
     assert r_list.status_code == 200
-    assert any(t["token"] == pair_token for t in r_list.json())
+    assert any(t["token"] == hash_token(pair_token) for t in r_list.json())
 
     r_rev = client.post(f"/api/pairing-tokens/{pair_token}/revoke")
     assert r_rev.status_code == 200

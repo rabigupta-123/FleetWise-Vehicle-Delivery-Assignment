@@ -5,6 +5,7 @@ All demo records carry `is_demo = 1` and all simulated telemetry carries `source
 Clearing demo data removes ONLY is_demo rows in a single atomic transaction.
 """
 import math
+import sqlite3
 import sys
 import threading
 import time
@@ -23,14 +24,15 @@ from app.db import get_connection, immediate_transaction, write_audit
 _SIMULATOR_THREAD: threading.Thread | None = None
 _SIMULATOR_RUNNING = False
 _SIMULATOR_LOCK = threading.Lock()
+_DEMO_LOAD_LOCK = threading.Lock()
 
 
 def load_demo_data(center_lat: float = DEMO_CENTER_LAT, center_lon: float = DEMO_CENTER_LON) -> dict:
     """
     Idempotently loads a realistic 12-vehicle, 15-driver, 25-delivery demo dataset.
-    All records flagged with is_demo = 1.
-    If demo data already exists, returns 200 with status='already_loaded' and counts without changes.
-    Executes in a single atomic database transaction.
+    All records flagged with is_demo = 1 and unique demo_key.
+    If demo data already exists or a concurrent conflict occurs, returns status='already_loaded'
+    and counts without changes. Executes in a single atomic database transaction.
     """
     now = datetime.now(UTC)
     now_iso = now.isoformat()
@@ -78,12 +80,12 @@ def load_demo_data(center_lat: float = DEMO_CENTER_LAT, center_lon: float = DEMO
     priorities = ["low", "normal", "high", "urgent"]
     capacities = [25, 35, 200, 500, 850, 1100, 2400, 7500]
 
-    with immediate_transaction() as conn:
-        # Check idempotency: if demo data is already loaded, return existing counts immediately
-        demo_v = conn.execute("SELECT COUNT(*) FROM vehicles WHERE is_demo = 1").fetchone()[0]
-        demo_dr = conn.execute("SELECT COUNT(*) FROM drivers WHERE is_demo = 1").fetchone()[0]
-        demo_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE is_demo = 1").fetchone()[0]
-        if demo_v > 0 or demo_dr > 0 or demo_del > 0:
+    def _get_already_loaded_payload() -> dict:
+        conn = get_connection()
+        try:
+            demo_v = conn.execute("SELECT COUNT(*) FROM vehicles WHERE is_demo = 1").fetchone()[0]
+            demo_dr = conn.execute("SELECT COUNT(*) FROM drivers WHERE is_demo = 1").fetchone()[0]
+            demo_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE is_demo = 1").fetchone()[0]
             return {
                 "status": "already_loaded",
                 "counts": {
@@ -93,122 +95,144 @@ def load_demo_data(center_lat: float = DEMO_CENTER_LAT, center_lon: float = DEMO
                 },
                 "center": {"latitude": center_lat, "longitude": center_lon},
             }
+        finally:
+            conn.close()
 
-        # Insert Vehicles
-        for vid, reg, vtype, cap, st in demo_vehicles:
-            conn.execute(
-                """
-                INSERT INTO vehicles (vehicle_id, registration_no, type, capacity, status, is_demo)
-                VALUES (?, ?, ?, ?, ?, 1)
-                """,
-                (vid, reg, vtype, cap, st),
-            )
-            write_audit(conn, actor="demo_loader", action="create_demo", entity="vehicle", entity_id=vid, after={"capacity": cap, "type": vtype})
+    with _DEMO_LOAD_LOCK:
+        try:
+            with immediate_transaction() as conn:
+                # Check idempotency: if demo data is already loaded, return existing counts immediately
+                demo_v = conn.execute("SELECT COUNT(*) FROM vehicles WHERE is_demo = 1").fetchone()[0]
+                demo_dr = conn.execute("SELECT COUNT(*) FROM drivers WHERE is_demo = 1").fetchone()[0]
+                demo_del = conn.execute("SELECT COUNT(*) FROM deliveries WHERE is_demo = 1").fetchone()[0]
+                if demo_v > 0 or demo_dr > 0 or demo_del > 0:
+                    return {
+                        "status": "already_loaded",
+                        "counts": {
+                            "vehicles": demo_v,
+                            "drivers": demo_dr,
+                            "deliveries": demo_del,
+                        },
+                        "center": {"latitude": center_lat, "longitude": center_lon},
+                    }
 
-        # Insert Drivers
-        for did, name, phone, st in demo_drivers:
-            conn.execute(
-                """
-                INSERT INTO drivers (driver_id, name, phone, availability_status, is_demo)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                (did, name, phone, st),
-            )
-            write_audit(conn, actor="demo_loader", action="create_demo", entity="driver", entity_id=did, after={"name": name})
+                # Insert Vehicles with unique demo_key
+                for vid, reg, vtype, cap, st in demo_vehicles:
+                    conn.execute(
+                        """
+                        INSERT INTO vehicles (vehicle_id, registration_no, type, capacity, status, is_demo, demo_key)
+                        VALUES (?, ?, ?, ?, ?, 1, ?)
+                        """,
+                        (vid, reg, vtype, cap, st, vid),
+                    )
+                    write_audit(conn, actor="demo_loader", action="create_demo", entity="vehicle", entity_id=vid, after={"capacity": cap, "type": vtype})
 
-        # Generate 25 deliveries around center
-        created_deliveries = []
-        for i in range(1, 26):
-            del_id = f"DEL-DEMO-{i:03d}"
-            # Scatter coordinates in radius ~ 0.01 - 0.05 deg (~1-5 km)
-            angle_p = (i * 2.39996)  # Golden ratio angle
-            angle_d = angle_p + 1.2
-            r_p = 0.015 + (i % 5) * 0.008
-            r_d = 0.025 + (i % 4) * 0.009
+                # Insert Drivers with unique demo_key
+                for did, name, phone, st in demo_drivers:
+                    conn.execute(
+                        """
+                        INSERT INTO drivers (driver_id, name, phone, availability_status, is_demo, demo_key)
+                        VALUES (?, ?, ?, ?, 1, ?)
+                        """,
+                        (did, name, phone, st, did),
+                    )
+                    write_audit(conn, actor="demo_loader", action="create_demo", entity="driver", entity_id=did, after={"name": name})
 
-            p_lat = round(center_lat + r_p * math.sin(angle_p), 6)
-            p_lon = round(center_lon + r_p * math.cos(angle_p), 6)
-            d_lat = round(center_lat + r_d * math.sin(angle_d), 6)
-            d_lon = round(center_lon + r_d * math.cos(angle_d), 6)
+                # Generate 25 deliveries around center with unique demo_key
+                created_deliveries = []
+                for i in range(1, 26):
+                    del_id = f"DEL-DEMO-{i:03d}"
+                    # Scatter coordinates in radius ~ 0.01 - 0.05 deg (~1-5 km)
+                    angle_p = (i * 2.39996)  # Golden ratio angle
+                    angle_d = angle_p + 1.2
+                    r_p = 0.015 + (i % 5) * 0.008
+                    r_d = 0.025 + (i % 4) * 0.009
 
-            p_name = f"Demo Hub {chr(65 + (i % 6))}"
-            d_name = f"Demo Destination #{i}"
-            sched = (now + timedelta(minutes=10 * (i - 12))).strftime("%Y-%m-%dT%H:%M:%SZ")
-            prio = priorities[i % len(priorities)]
-            req_cap = capacities[i % len(capacities)]
+                    p_lat = round(center_lat + r_p * math.sin(angle_p), 6)
+                    p_lon = round(center_lon + r_p * math.cos(angle_p), 6)
+                    d_lat = round(center_lat + r_d * math.sin(angle_d), 6)
+                    d_lon = round(center_lon + r_d * math.cos(angle_d), 6)
 
-            # Target status: 10 pending, 8 assigned, 4 in_transit, 3 delivered
-            status = "pending"
-            if i <= 10:
-                status = "pending"
-            elif i <= 18:
-                status = "assigned"
-            elif i <= 22:
-                status = "in_transit"
-            else:
-                status = "delivered"
+                    p_name = f"Demo Hub {chr(65 + (i % 6))}"
+                    d_name = f"Demo Destination #{i}"
+                    sched = (now + timedelta(minutes=10 * (i - 12))).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    prio = priorities[i % len(priorities)]
+                    req_cap = capacities[i % len(capacities)]
 
-            conn.execute(
-                """
-                INSERT INTO deliveries (
-                    delivery_id, pickup, dropoff, scheduled_time, priority,
-                    required_capacity, status, created_at, version, is_demo,
-                    pickup_lat, pickup_lng, drop_lat, drop_lng
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)
-                """,
-                (
-                    del_id, f"{p_name} ({p_lat},{p_lon})", f"{d_name} ({d_lat},{d_lon})", sched, prio,
-                    req_cap, status, now_iso,
-                    p_lat, p_lon, d_lat, d_lon,
-                ),
-            )
-            created_deliveries.append((del_id, status, p_lat, p_lon, d_lat, d_lon))
+                    # Target status: 10 pending, 8 assigned, 4 in_transit, 3 delivered
+                    status = "pending"
+                    if i <= 10:
+                        status = "pending"
+                    elif i <= 18:
+                        status = "assigned"
+                    elif i <= 22:
+                        status = "in_transit"
+                    else:
+                        status = "delivered"
 
-        # Wire assignments and tracking sessions for assigned and en_route deliveries
-        # Delivery 11 -> Van 03, Driver 05 (assigned)
-        conn.execute(
-            """
-            INSERT INTO assignments (delivery_id, vehicle_id, driver_id, assigned_at)
-            VALUES ('DEL-DEMO-011', 'V-DEMO-V03', 'DR-DEMO-05', ?)
-            """,
-            (now_iso,),
-        )
-        # Delivery 19 -> Mini-truck 02, Driver 08 (en_route)
-        conn.execute(
-            """
-            INSERT INTO assignments (delivery_id, vehicle_id, driver_id, assigned_at)
-            VALUES ('DEL-DEMO-019', 'V-DEMO-M02', 'DR-DEMO-08', ?)
-            """,
-            (now_iso,),
-        )
-        # Create active demo tracking session for DEL-DEMO-019
-        sess_id = "TRK-DEMO-SESS-01"
-        conn.execute(
-            """
-            INSERT INTO tracking_sessions (session_id, driver_id, vehicle_id, delivery_id, started_at, status, is_demo)
-            VALUES (?, 'DR-DEMO-08', 'V-DEMO-M02', 'DEL-DEMO-019', ?, 'active', 1)
-            """,
-            (sess_id, now_iso),
-        )
+                    conn.execute(
+                        """
+                        INSERT INTO deliveries (
+                            delivery_id, pickup, dropoff, scheduled_time, priority,
+                            required_capacity, status, created_at, version, is_demo, demo_key,
+                            pickup_lat, pickup_lng, drop_lat, drop_lng
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            del_id, f"{p_name} ({p_lat},{p_lon})", f"{d_name} ({d_lat},{d_lon})", sched, prio,
+                            req_cap, status, now_iso, del_id,
+                            p_lat, p_lon, d_lat, d_lon,
+                        ),
+                    )
+                    created_deliveries.append((del_id, status, p_lat, p_lon, d_lat, d_lon))
 
-        # Pre-seed initial GPS fix for V-DEMO-M02 with source = 'simulated'
-        conn.execute(
-            """
-            INSERT INTO gps_locations (
-                session_id, driver_id, vehicle_id, delivery_id, latitude, longitude, accuracy, device_timestamp,
-                server_timestamp, speed, heading, source, is_gated
-            ) VALUES (?, 'DR-DEMO-08', 'V-DEMO-M02', 'DEL-DEMO-019', ?, ?, 5.0, ?, ?, 8.5, 90.0, 'simulated', 0)
-            """,
-            (sess_id, center_lat, center_lon, now_iso, now_iso),
-        )
+                # Wire assignments and tracking sessions for assigned and en_route deliveries
+                # Delivery 11 -> Van 03, Driver 05 (assigned)
+                conn.execute(
+                    """
+                    INSERT INTO assignments (delivery_id, vehicle_id, driver_id, assigned_at)
+                    VALUES ('DEL-DEMO-011', 'V-DEMO-V03', 'DR-DEMO-05', ?)
+                    """,
+                    (now_iso,),
+                )
+                # Delivery 19 -> Mini-truck 02, Driver 08 (en_route)
+                conn.execute(
+                    """
+                    INSERT INTO assignments (delivery_id, vehicle_id, driver_id, assigned_at)
+                    VALUES ('DEL-DEMO-019', 'V-DEMO-M02', 'DR-DEMO-08', ?)
+                    """,
+                    (now_iso,),
+                )
+                # Create active demo tracking session for DEL-DEMO-019
+                sess_id = "TRK-DEMO-SESS-01"
+                conn.execute(
+                    """
+                    INSERT INTO tracking_sessions (session_id, driver_id, vehicle_id, delivery_id, started_at, status, is_demo)
+                    VALUES (?, 'DR-DEMO-08', 'V-DEMO-M02', 'DEL-DEMO-019', ?, 'active', 1)
+                    """,
+                    (sess_id, now_iso),
+                )
 
-    return {
-        "status": "loaded",
-        "vehicles": len(demo_vehicles),
-        "drivers": len(demo_drivers),
-        "deliveries": len(created_deliveries),
-        "center": {"latitude": center_lat, "longitude": center_lon},
-    }
+                # Pre-seed initial GPS fix for V-DEMO-M02 with source = 'simulated' and is_demo = 1
+                conn.execute(
+                    """
+                    INSERT INTO gps_locations (
+                        session_id, driver_id, vehicle_id, delivery_id, latitude, longitude, accuracy, device_timestamp,
+                        server_timestamp, speed, heading, source, is_gated, is_demo
+                    ) VALUES (?, 'DR-DEMO-08', 'V-DEMO-M02', 'DEL-DEMO-019', ?, ?, 5.0, ?, ?, 8.5, 90.0, 'simulated', 0, 1)
+                    """,
+                    (sess_id, center_lat, center_lon, now_iso, now_iso),
+                )
+
+            return {
+                "status": "loaded",
+                "vehicles": len(demo_vehicles),
+                "drivers": len(demo_drivers),
+                "deliveries": len(created_deliveries),
+                "center": {"latitude": center_lat, "longitude": center_lon},
+            }
+        except sqlite3.IntegrityError:
+            return _get_already_loaded_payload()
 
 
 def clear_demo_data() -> dict:
@@ -221,70 +245,74 @@ def clear_demo_data() -> dict:
     with _SIMULATOR_LOCK:
         _SIMULATOR_RUNNING = False
 
-    with immediate_transaction() as conn:
-        # 1. Delete telematics referencing demo entities
-        conn.execute(
-            """
-            DELETE FROM gps_locations
-            WHERE source = 'simulated'
-               OR delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
-               OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
-               OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
-               OR session_id IN (SELECT session_id FROM tracking_sessions WHERE is_demo = 1)
-            """
-        )
+    with _DEMO_LOAD_LOCK:
+        with immediate_transaction() as conn:
+            # 1. Delete telematics referencing demo entities (explicit child-first defense in depth)
+            conn.execute(
+                """
+                DELETE FROM gps_locations
+                WHERE is_demo = 1
+                   OR source = 'simulated'
+                   OR delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
+                   OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
+                   OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
+                   OR session_id IN (SELECT session_id FROM tracking_sessions WHERE is_demo = 1)
+                """
+            )
 
-        # 2. Delete tracking sessions referencing demo entities
-        conn.execute(
-            """
-            DELETE FROM tracking_sessions
-            WHERE is_demo = 1
-               OR delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
-               OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
-               OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
-            """
-        )
+            # 2. Delete tracking sessions referencing demo entities
+            conn.execute(
+                """
+                DELETE FROM tracking_sessions
+                WHERE is_demo = 1
+                   OR delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
+                   OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
+                   OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
+                """
+            )
 
-        # 3. Delete assignments referencing demo entities
-        conn.execute(
-            """
-            DELETE FROM assignments
-            WHERE delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
-               OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
-               OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
-            """
-        )
+            # 3. Delete assignments referencing demo entities
+            conn.execute(
+                """
+                DELETE FROM assignments
+                WHERE delivery_id IN (SELECT delivery_id FROM deliveries WHERE is_demo = 1)
+                   OR vehicle_id IN (SELECT vehicle_id FROM vehicles WHERE is_demo = 1)
+                   OR driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)
+                """
+            )
 
-        # 4. Clean up any device/token references to demo drivers
-        conn.execute("DELETE FROM phone_pairing_tokens WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
-        conn.execute("DELETE FROM devices WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
-        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
-        if "phone_verifications" in tables:
-            conn.execute("DELETE FROM phone_verifications WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
+            # 4. Clean up any device/token/session references to demo drivers
+            conn.execute("DELETE FROM phone_pairing_tokens WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
+            tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            if "driver_sessions" in tables:
+                conn.execute("DELETE FROM driver_sessions WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
+            conn.execute("DELETE FROM devices WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
+            if "phone_verifications" in tables:
+                conn.execute("DELETE FROM phone_verifications WHERE driver_id IN (SELECT driver_id FROM drivers WHERE is_demo = 1)")
 
-        # 5. Delete demo deliveries, drivers, and vehicles
-        del_count = conn.execute("DELETE FROM deliveries WHERE is_demo = 1").rowcount
-        drv_count = conn.execute("DELETE FROM drivers WHERE is_demo = 1").rowcount
-        veh_count = conn.execute("DELETE FROM vehicles WHERE is_demo = 1").rowcount
+            # 5. Delete demo deliveries, drivers, and vehicles
+            del_count = conn.execute("DELETE FROM deliveries WHERE is_demo = 1").rowcount
+            drv_count = conn.execute("DELETE FROM drivers WHERE is_demo = 1").rowcount
+            veh_count = conn.execute("DELETE FROM vehicles WHERE is_demo = 1").rowcount
 
-        # 6. Record demo clearing in append-only audit log
-        write_audit(
-            conn,
-            actor="demo_loader",
-            action="clear_demo",
-            entity="demo_system",
-            entity_id="all",
-            after={"vehicles": veh_count, "drivers": drv_count, "deliveries": del_count},
-        )
+            # 6. Record demo clearing in append-only audit log
+            write_audit(
+                conn,
+                actor="demo_loader",
+                action="clear_demo",
+                entity="demo_system",
+                entity_id="all",
+                after={"vehicles": veh_count, "drivers": drv_count, "deliveries": del_count},
+            )
 
-    return {
-        "status": "cleared",
-        "deleted": {
-            "vehicles": veh_count,
-            "drivers": drv_count,
-            "deliveries": del_count,
-        },
-    }
+        return {
+            "status": "cleared",
+            "deleted": {
+                "vehicles": veh_count,
+                "drivers": drv_count,
+                "deliveries": del_count,
+            },
+        }
 
 
 def get_demo_status() -> dict:

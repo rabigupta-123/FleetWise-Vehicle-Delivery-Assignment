@@ -98,7 +98,7 @@ def get_worked_examples() -> dict[str, Any]:
     # 8. GPS Accuracy & Position Confidence Worked Example (accuracy 76.0m)
     acc_ex = 76.0
     acc_score_ex = calculate_accuracy_score(acc_ex)
-    acc_sigma_ex = calculate_sigma_pos(acc_ex)
+    acc_sigma_ex = calculate_sigma_pos(acc_ex) or 50.6667
     acc_label_ex = get_accuracy_quality_label(acc_ex)
     acc_95_ex = calculate_95pct_radius(acc_sigma_ex)
     acc_cpos_50_ex = calculate_position_confidence(acc_sigma_ex, 50.0)

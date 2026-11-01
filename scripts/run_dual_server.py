@@ -22,7 +22,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import uvicorn
-from app.auth import generate_pairing_token
+from app.auth import generate_pairing_token, revoke_all_pairing_tokens
+from app.config import is_demo_routes_enabled
+from app.db import init_db
 from scripts.generate_ssl_certs import ensure_valid_certs
 
 
@@ -82,7 +84,9 @@ def print_qr_code(url: str) -> None:
         matrix = qr.get_matrix()
         print("\n Driver Phone Mobile Pairing QR Code:")
         try:
-            sys.stdout.reconfigure(encoding="utf-8")
+            reconf = getattr(sys.stdout, "reconfigure", None)
+            if callable(reconf):
+                reconf(encoding="utf-8")
             for row in matrix:
                 print("  " + "".join("██" if col else "  " for col in row))
         except Exception:
@@ -116,6 +120,9 @@ def print_access_table(lan_ip: str, pairing_token: str, share_mode: bool) -> Non
         print("\n [!] DANGER: --share IS ACTIVE!")
         print("     WARNING: Anyone on this network can control FleetWise without authentication.")
         print("     Do not use this flag on public, campus, or untrusted Wi-Fi.")
+        if is_demo_routes_enabled():
+            print(" [!!!] CRITICAL SECURITY WARNING: Server is listening on 0.0.0.0 with ENABLE_DEMO_ROUTES=true!")
+            print("       Destructive demo routes (/demo/load, /demo/clear) are exposed to the network!")
     else:
         print("\n [i] Security: Loopback isolation is ACTIVE.")
         print("     Desktop dashboard and control APIs are strictly locked to loopback clients (127.0.0.1 / ::1).")
@@ -138,8 +145,13 @@ async def run_dual_servers(
     if share_mode:
         os.environ["FLEETWISE_SHARE_LAN"] = "1"
 
+    init_db()
+    revoked_n = revoke_all_pairing_tokens()
+    if revoked_n:
+        print(f" [i] Revoked {revoked_n} previously issued pairing token(s).")
+
     lan_ip = detect_primary_lan_ip(override_ip)
-    pairing_token = generate_pairing_token(driver_id=None, valid_hours=48)
+    pairing_token = generate_pairing_token(driver_id=None, valid_minutes=10)
 
     # 1. Ensure SAN certificates exist and include selected LAN IP
     ensure_valid_certs()
