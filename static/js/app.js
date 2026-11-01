@@ -17,6 +17,8 @@ const STATE = {
     cancelled_count: 0,
     utilisation_pct: 0,
   },
+  metricsHistory: [],
+  previousMetrics: null,
   vehicles: [],
   drivers: [],
   devices: [],
@@ -40,7 +42,108 @@ const STATE = {
   blockedQueue: [],
   selectedTrackingVehicleId: null,
   selectedTrackingDeliveryId: null,
+  scheduleSelectedDate: null,
+  dashDeliveriesPage: 1,
+  deliveriesPage: 1,
 };
+
+function getInitials(name) {
+  if (!name || typeof name !== 'string') return 'DR';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'DR';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function demoBadgeHtml(isDemo, isSimulated = false) {
+  let html = '';
+  if (isDemo) {
+    html += `<span class="demo-chip">DEMO</span>`;
+  }
+  if (isSimulated) {
+    html += `<span class="simulated-chip">SIMULATED</span>`;
+  }
+  return html;
+}
+
+function formatSlaCountdown(scheduledTimeStr, status) {
+  if (status === 'delivered') {
+    return { text: 'Delivered', overdue: false };
+  }
+  if (status === 'cancelled') {
+    return { text: 'Cancelled', overdue: false };
+  }
+  if (!scheduledTimeStr) {
+    return { text: 'n/a', overdue: false };
+  }
+  const targetMs = Date.parse(scheduledTimeStr);
+  if (Number.isNaN(targetMs)) {
+    return { text: 'n/a', overdue: false };
+  }
+  const diffMin = Math.round((targetMs - Date.now()) / 60000);
+  if (diffMin < 0) {
+    const absMin = Math.abs(diffMin);
+    const hrs = Math.floor(absMin / 60);
+    const mins = absMin % 60;
+    return {
+      text: hrs > 0 ? `Overdue ${hrs}h ${mins}m` : `Overdue ${mins}m`,
+      overdue: true,
+    };
+  }
+  const hrs = Math.floor(diffMin / 60);
+  const mins = diffMin % 60;
+  return {
+    text: hrs > 0 ? `${hrs}h ${mins}m left` : `${mins}m left`,
+    overdue: false,
+  };
+}
+
+function animateCountUp(el, targetNum, suffix = '') {
+  if (!el) return;
+  const num = Number(targetNum);
+  if (!Number.isFinite(num)) {
+    el.textContent = `n/a`;
+    return;
+  }
+  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const prevRaw = el.getAttribute('data-numeric-val');
+  el.setAttribute('data-numeric-val', String(num));
+  if (reducedMotion || prevRaw === null || Number(prevRaw) === num) {
+    el.textContent = `${num}${suffix}`;
+    return;
+  }
+  const startVal = Number(prevRaw) || 0;
+  const startTime = performance.now();
+  const duration = 240;
+  function step(now) {
+    const t = Math.min(1, (now - startTime) / duration);
+    const current = Math.round(startVal + (num - startVal) * t);
+    el.textContent = `${current}${suffix}`;
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function updateKpiDeltaPill(id, curVal, prevVal, suffix = '') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (prevVal === null || prevVal === undefined || !Number.isFinite(Number(prevVal))) {
+    el.textContent = 'n/a';
+    el.className = 'kpi-delta-pill';
+    return;
+  }
+  const diff = Number(curVal) - Number(prevVal);
+  if (diff === 0) {
+    el.textContent = `0${suffix}`;
+    el.className = 'kpi-delta-pill';
+  } else if (diff > 0) {
+    el.textContent = `+${diff}${suffix}`;
+    el.className = 'kpi-delta-pill up';
+  } else {
+    el.textContent = `${diff}${suffix}`;
+    el.className = 'kpi-delta-pill down';
+  }
+}
 
 const VIEW_META = {
   dashboard: {
@@ -184,14 +287,44 @@ function clearGlobalError() {
   if (banner) banner.classList.add('hidden');
 }
 
+function getCookieValue(name) {
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return match ? decodeURIComponent(match[2]) : '';
+}
+
+async function ensureCsrfToken() {
+  let tok = getCookieValue('csrf_token');
+  if (!tok) {
+    try {
+      const res = await fetch('/api/csrf-token', { credentials: 'same-origin' });
+      if (res.ok) {
+        const d = await res.json();
+        tok = d.csrf_token || getCookieValue('csrf_token');
+      }
+    } catch (_) {}
+  }
+  return tok;
+}
+
 async function apiRequest(path, options = {}) {
+  options.headers = options.headers || {};
   const opName = localStorage.getItem('fleetwise_operator_name');
   if (opName) {
-    options.headers = options.headers || {};
     if (options.headers instanceof Headers) {
       options.headers.set('X-Operator-Name', opName);
     } else {
       options.headers['X-Operator-Name'] = opName;
+    }
+  }
+  const method = (options.method || 'GET').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrfToken = await ensureCsrfToken();
+    if (csrfToken) {
+      if (options.headers instanceof Headers) {
+        options.headers.set('X-CSRF-Token', csrfToken);
+      } else {
+        options.headers['X-CSRF-Token'] = csrfToken;
+      }
     }
   }
   const res = await fetch(path, options);
@@ -233,7 +366,20 @@ async function refreshAllData(silent = false) {
 
 
     if (metricsRes.status === 'fulfilled' && metricsRes.value) {
+      if (STATE.metricsHistory.length > 0) {
+        STATE.previousMetrics = { ...STATE.metrics };
+      }
       STATE.metrics = { ...STATE.metrics, ...metricsRes.value };
+      STATE.metricsHistory.push({
+        ts: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+        available_fleet: Number(STATE.metrics.available_fleet ?? 0),
+        active_deliveries: Number(STATE.metrics.active_deliveries ?? 0),
+        delivered_count: Number(STATE.metrics.delivered_count ?? 0),
+        utilisation_pct: Number(STATE.metrics.utilisation_pct ?? 0),
+      });
+      if (STATE.metricsHistory.length > 24) {
+        STATE.metricsHistory.shift();
+      }
     }
     if (vehiclesRes.status === 'fulfilled' && Array.isArray(vehiclesRes.value)) {
       STATE.vehicles = vehiclesRes.value;
@@ -253,8 +399,12 @@ async function refreshAllData(silent = false) {
         apiRequest('/network-info').catch(() => null),
         apiRequest('/demo/status').catch(() => null),
       ]);
+      const modeBadge = document.getElementById('access-mode-badge');
       if (netInfo && netInfo.is_share_lan) {
         document.getElementById('share-lan-banner')?.classList.remove('hidden');
+        if (modeBadge) modeBadge.textContent = 'SHARING ON LAN';
+      } else if (modeBadge) {
+        modeBadge.textContent = 'LOCAL DEMO MODE';
       }
       if (simStatus) {
         const lbl = document.getElementById('sim-status-label');
@@ -272,7 +422,9 @@ async function refreshAllData(silent = false) {
     await refreshFilteredDeliveries();
     await refreshBlockedQueue();
     renderAll();
-    if (STATE.activeView === 'analytics') {
+    if (STATE.activeView === 'dashboard') {
+      updateDashboardLiveMap();
+    } else if (STATE.activeView === 'analytics') {
       renderAnalytics();
     } else if (STATE.activeView === 'routes') {
       renderRouteRadar();
@@ -330,19 +482,25 @@ function renderNavBadges() {
 
 function renderDashboard() {
   const m = STATE.metrics;
-  document.getElementById('kpi-available-fleet').textContent = m.available_fleet ?? 0;
-  document.getElementById('kpi-fleet-breakdown').textContent = `/ ${m.total_vehicles ?? STATE.vehicles.length} total vehicles`;
+  const prev = STATE.previousMetrics;
+
+  animateCountUp(document.getElementById('kpi-available-fleet'), m.available_fleet ?? 0);
+  document.getElementById('kpi-fleet-breakdown').textContent = `/ ${m.total_vehicles ?? STATE.vehicles.length} total`;
   document.getElementById('kpi-fleet-detail').textContent = `${m.assigned_vehicles ?? 0} assigned · ${m.maintenance_vehicles ?? 0} maintenance`;
+  updateKpiDeltaPill('kpi-delta-fleet', m.available_fleet ?? 0, prev ? prev.available_fleet : null);
 
-  document.getElementById('kpi-active-deliveries').textContent = m.active_deliveries ?? 0;
+  animateCountUp(document.getElementById('kpi-active-deliveries'), m.active_deliveries ?? 0);
   document.getElementById('kpi-pending-count').textContent = `${m.pending_deliveries ?? 0} pending`;
+  updateKpiDeltaPill('kpi-delta-active', m.active_deliveries ?? 0, prev ? prev.active_deliveries : null);
 
-  document.getElementById('kpi-delivered-count').textContent = m.delivered_count ?? 0;
+  animateCountUp(document.getElementById('kpi-delivered-count'), m.delivered_count ?? 0);
   document.getElementById('kpi-cancelled-count').textContent = `${m.cancelled_count ?? 0} cancelled`;
+  updateKpiDeltaPill('kpi-delta-delivered', m.delivered_count ?? 0, prev ? prev.delivered_count : null);
 
   const pct = Number(m.utilisation_pct ?? 0);
-  document.getElementById('kpi-utilisation-pct').textContent = `${pct.toFixed(0)}%`;
+  animateCountUp(document.getElementById('kpi-utilisation-pct'), Math.round(pct), '%');
   document.getElementById('kpi-driver-summary').textContent = `${m.available_drivers ?? 0} / ${m.total_drivers ?? STATE.drivers.length} drivers available`;
+  updateKpiDeltaPill('kpi-delta-utilisation', Math.round(pct), prev ? Math.round(Number(prev.utilisation_pct ?? 0)) : null, '%');
 
   const circumference = 201.06;
   const offset = circumference - (Math.min(100, Math.max(0, pct)) / 100) * circumference;
@@ -364,6 +522,11 @@ function renderDashboard() {
   if (emptyPanel) {
     emptyPanel.classList.toggle('hidden', !isDbEmpty);
   }
+
+  renderDashboardBentoCards();
+  renderDashboardDateStrip();
+  renderDashboardCharts();
+  renderDashboardDeliveriesTable();
 
   // Render 4 Lanes: pending, assigned, in_transit, delivered
   const lanes = ['pending', 'assigned', 'in_transit', 'delivered'];
@@ -423,7 +586,7 @@ function renderDashboard() {
         return `
           <div class="lane-card">
             <div class="lane-card-top">
-              <span class="lane-card-id">${escapeHtml(d.delivery_id)}</span>
+              <span class="lane-card-id">${escapeHtml(d.delivery_id)}${demoBadgeHtml(d.is_demo)}</span>
               ${priorityBadgeHtml(d.priority)}
             </div>
             <div class="lane-card-route">${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)}</div>
@@ -439,8 +602,376 @@ function renderDashboard() {
   });
 }
 
+function renderDashboardBentoCards() {
+  // 1. Orange Feature Card: "Next dispatch" + Blocked Queue count
+  const blockedCountEl = document.getElementById('dash-blocked-count');
+  if (blockedCountEl) {
+    blockedCountEl.textContent = String((STATE.blockedQueue && STATE.blockedQueue.length) || 0);
+  }
+  const priorityOrder = { urgent: 0, high: 1, normal: 2, low: 3 };
+  const pendingSorted = STATE.deliveries
+    .filter((d) => d.status === 'pending')
+    .sort((a, b) => {
+      const pa = priorityOrder[(a.priority || 'normal').toLowerCase()] ?? 2;
+      const pb = priorityOrder[(b.priority || 'normal').toLowerCase()] ?? 2;
+      if (pa !== pb) return pa - pb;
+      return String(a.scheduled_time || '').localeCompare(String(b.scheduled_time || ''));
+    });
+
+  const titleEl = document.getElementById('dash-next-dispatch-title');
+  const routeEl = document.getElementById('dash-next-dispatch-route');
+  const metaEl = document.getElementById('dash-next-dispatch-meta');
+  const dispatchBtn = document.getElementById('btn-dash-next-dispatch');
+
+  if (pendingSorted.length === 0) {
+    if (titleEl) titleEl.textContent = 'No pending deliveries';
+    if (routeEl) routeEl.textContent = 'Queue is clear — create or import deliveries to dispatch.';
+    if (metaEl) metaEl.innerHTML = `<span>Priority: n/a</span><span>Capacity: n/a</span>`;
+    if (dispatchBtn) {
+      dispatchBtn.disabled = true;
+      dispatchBtn.removeAttribute('data-dispatch-delivery');
+    }
+  } else {
+    const nextDel = pendingSorted[0];
+    const sla = formatSlaCountdown(nextDel.scheduled_time, nextDel.status);
+    if (titleEl) titleEl.textContent = `Order ${nextDel.delivery_id} (${(nextDel.priority || 'normal').toUpperCase()})`;
+    if (routeEl) routeEl.textContent = `${nextDel.pickup} → ${nextDel.dropoff}`;
+    if (metaEl) {
+      metaEl.innerHTML = `
+        <span>Cap: ${nextDel.required_capacity != null ? `${escapeHtml(nextDel.required_capacity)} kg` : 'Any'}</span>
+        <span>&bull; SLA: ${escapeHtml(sla.text)}</span>
+        ${nextDel.is_demo ? '<span>&bull; DEMO</span>' : ''}
+      `;
+    }
+    if (dispatchBtn) {
+      dispatchBtn.disabled = false;
+      dispatchBtn.setAttribute('data-dispatch-delivery', nextDel.delivery_id);
+    }
+  }
+
+  // 2. Dark Contrast Card (#14161B): "Today's deliveries" with SLA countdown chips
+  const todayIsoPrefix = new Date().toISOString().slice(0, 10);
+  const todaysDeliveries = STATE.deliveries.filter((d) => String(d.scheduled_time || '').startsWith(todayIsoPrefix));
+  const listSource = todaysDeliveries.length > 0 ? todaysDeliveries : STATE.deliveries.slice(0, 6);
+  const countEl = document.getElementById('dash-todays-count');
+  const slaListEl = document.getElementById('dash-todays-sla-list');
+  if (countEl) countEl.textContent = String(listSource.length);
+  if (slaListEl) {
+    if (listSource.length === 0) {
+      slaListEl.innerHTML = `
+        <div class="sla-item">
+          <div class="sla-item-route">No deliveries scheduled yet.</div>
+        </div>
+      `;
+    } else {
+      slaListEl.innerHTML = listSource.slice(0, 5).map((d) => {
+        const sla = formatSlaCountdown(d.scheduled_time, d.status);
+        return `
+          <div class="sla-item">
+            <div class="sla-item-top">
+              <span class="sla-item-id">${escapeHtml(d.delivery_id)} &bull; ${escapeHtml(d.status)}</span>
+              <span class="sla-countdown-chip ${sla.overdue ? 'overdue' : ''}">${escapeHtml(sla.text)}</span>
+            </div>
+            <div class="sla-item-route">${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+}
+
+function renderDashboardDateStrip() {
+  const stripEl = document.getElementById('dash-date-strip');
+  const resultsEl = document.getElementById('dash-date-strip-results');
+  const labelEl = document.getElementById('dash-schedule-selected-label');
+  if (!stripEl || !resultsEl) return;
+
+  // Build 7-day strip centered around today (-2 days to +4 days) or from existing delivery dates
+  const baseDate = new Date();
+  baseDate.setHours(0, 0, 0, 0);
+  const days = [];
+  for (let offset = -1; offset <= 5; offset++) {
+    const dt = new Date(baseDate.getTime() + offset * 86400000);
+    const isoDate = dt.toISOString().slice(0, 10);
+    const dow = dt.toLocaleDateString('en-US', { weekday: 'short' });
+    const dayNum = dt.getDate();
+    const count = STATE.deliveries.filter((d) => String(d.scheduled_time || '').slice(0, 10) === isoDate).length;
+    days.push({ isoDate, dow, dayNum, count });
+  }
+
+  stripEl.innerHTML = days.map((day) => {
+    const isActive = STATE.scheduleSelectedDate === day.isoDate;
+    return `
+      <button
+        type="button"
+        class="date-pill-btn ${isActive ? 'active' : ''}"
+        data-schedule-date="${escapeHtml(day.isoDate)}"
+        role="tab"
+        aria-selected="${isActive}"
+      >
+        <span class="date-pill-dow">${escapeHtml(day.dow)}</span>
+        <span class="date-pill-day tabular">${escapeHtml(day.dayNum)}</span>
+        <span class="date-pill-count tabular">${day.count} ord</span>
+      </button>
+    `;
+  }).join('');
+
+  const matching = STATE.scheduleSelectedDate
+    ? STATE.deliveries.filter((d) => String(d.scheduled_time || '').slice(0, 10) === STATE.scheduleSelectedDate)
+    : STATE.deliveries.slice(0, 4);
+
+  if (labelEl) {
+    labelEl.textContent = STATE.scheduleSelectedDate ? `Date: ${STATE.scheduleSelectedDate} (${matching.length})` : `Showing ${matching.length} of ${STATE.deliveries.length} scheduled`;
+  }
+
+  if (matching.length === 0) {
+    resultsEl.innerHTML = `<div class="chart-empty-state" style="padding:14px;">No deliveries scheduled on ${escapeHtml(STATE.scheduleSelectedDate || 'this period')}.</div>`;
+    return;
+  }
+
+  resultsEl.innerHTML = matching.slice(0, 5).map((d) => {
+    const sla = formatSlaCountdown(d.scheduled_time, d.status);
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 12px; border-radius:12px; background:var(--bg); border:1px solid var(--border); flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <strong class="mono" style="color:var(--orange-700);">${escapeHtml(d.delivery_id)}</strong>
+          ${demoBadgeHtml(d.is_demo)}
+          <span>${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)}</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="mono" style="font-size:11px; color:var(--muted);">${escapeHtml(sla.text)}</span>
+          ${priorityBadgeHtml(d.priority)}
+          ${statusBadgeHtml(d.status)}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderDashboardCharts() {
+  // 1. Utilisation Over Time (Area SVG with smooth curve + gradient fill)
+  const areaEl = document.getElementById('dash-chart-util-area');
+  if (areaEl) {
+    const pts = STATE.metricsHistory;
+    if (!pts || pts.length === 0 || (STATE.vehicles.length === 0 && STATE.deliveries.length === 0)) {
+      areaEl.innerHTML = `<div class="chart-empty-state">No data yet</div>`;
+    } else {
+      const w = 360;
+      const h = 175;
+      const padL = 32;
+      const padR = 14;
+      const padT = 16;
+      const padB = 26;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+      const series = pts.length === 1 ? [pts[0], pts[0]] : pts;
+      const coords = series.map((p, idx) => {
+        const x = padL + (idx / (series.length - 1)) * plotW;
+        const y = padT + plotH - (Math.min(100, Math.max(0, p.utilisation_pct)) / 100) * plotH;
+        return { x, y, val: p.utilisation_pct, ts: p.ts };
+      });
+      let pathD = `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`;
+      for (let i = 0; i < coords.length - 1; i++) {
+        const cx = ((coords[i].x + coords[i + 1].x) / 2).toFixed(1);
+        pathD += ` C ${cx} ${coords[i].y.toFixed(1)}, ${cx} ${coords[i + 1].y.toFixed(1)}, ${coords[i + 1].x.toFixed(1)} ${coords[i + 1].y.toFixed(1)}`;
+      }
+      const areaD = `${pathD} L ${coords[coords.length - 1].x.toFixed(1)} ${(padT + plotH).toFixed(1)} L ${coords[0].x.toFixed(1)} ${(padT + plotH).toFixed(1)} Z`;
+      areaEl.innerHTML = `
+        <svg viewBox="0 0 ${w} ${h}" width="100%" height="180" role="img" aria-label="Fleet utilisation over time area chart">
+          <defs>
+            <linearGradient id="orangeAreaGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#F97316" stop-opacity="0.38"/>
+              <stop offset="100%" stop-color="#F97316" stop-opacity="0.02"/>
+            </linearGradient>
+          </defs>
+          <line x1="${padL}" y1="${padT}" x2="${w - padR}" y2="${padT}" stroke="var(--border)" stroke-dasharray="3 3" />
+          <line x1="${padL}" y1="${padT + plotH / 2}" x2="${w - padR}" y2="${padT + plotH / 2}" stroke="var(--border)" stroke-dasharray="3 3" />
+          <line x1="${padL}" y1="${padT + plotH}" x2="${w - padR}" y2="${padT + plotH}" stroke="var(--border)" />
+          <text x="4" y="${padT + 4}" font-size="10" font-family="var(--font-mono)" fill="var(--muted)">100%</text>
+          <text x="8" y="${padT + plotH / 2 + 4}" font-size="10" font-family="var(--font-mono)" fill="var(--muted)">50%</text>
+          <text x="14" y="${padT + plotH + 4}" font-size="10" font-family="var(--font-mono)" fill="var(--muted)">0%</text>
+          <path d="${areaD}" fill="url(#orangeAreaGrad)" />
+          <path d="${pathD}" fill="none" stroke="#EA580C" stroke-width="2.5" stroke-linecap="round" />
+          ${coords.map((c) => `
+            <circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="#C2410C" stroke="#FFFFFF" stroke-width="1.5">
+              <title>${escapeHtml(c.ts)}: ${c.val.toFixed(1)}% utilisation</title>
+            </circle>
+          `).join('')}
+        </svg>
+      `;
+    }
+  }
+
+  // 2. Status Funnel (Donut SVG)
+  const donutEl = document.getElementById('dash-chart-status-donut');
+  if (donutEl) {
+    const total = STATE.deliveries.length;
+    if (total === 0) {
+      donutEl.innerHTML = `<div class="chart-empty-state">No data yet</div>`;
+    } else {
+      const counts = [
+        { label: 'Pending', count: STATE.deliveries.filter((d) => d.status === 'pending').length, color: '#B45309' },
+        { label: 'Assigned', count: STATE.deliveries.filter((d) => d.status === 'assigned').length, color: '#1D4ED8' },
+        { label: 'In Transit', count: STATE.deliveries.filter((d) => d.status === 'in_transit').length, color: '#F97316' },
+        { label: 'Delivered', count: STATE.deliveries.filter((d) => d.status === 'delivered').length, color: '#15803D' },
+        { label: 'Cancelled', count: STATE.deliveries.filter((d) => d.status === 'cancelled').length, color: '#B91C1C' },
+      ];
+      const r = 56;
+      const circ = 2 * Math.PI * r;
+      let accum = 0;
+      const arcs = counts.filter((s) => s.count > 0).map((seg) => {
+        const frac = seg.count / total;
+        const len = frac * circ;
+        const dashArray = `${len.toFixed(2)} ${(circ - len).toFixed(2)}`;
+        const dashOffset = (-accum * circ).toFixed(2);
+        accum += frac;
+        return `<circle cx="80" cy="85" r="${r}" fill="none" stroke="${seg.color}" stroke-width="18" stroke-dasharray="${dashArray}" stroke-dashoffset="${dashOffset}" transform="rotate(-90 80 85)"><title>${seg.label}: ${seg.count} (${Math.round(frac * 100)}%)</title></circle>`;
+      }).join('');
+
+      const legend = counts.map((s) => `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11.5px;">
+          <span style="display:inline-flex; align-items:center; gap:6px; color:var(--ink);">
+            <span style="width:9px; height:9px; border-radius:50%; background:${s.color}; display:inline-block;"></span>
+            ${escapeHtml(s.label)}
+          </span>
+          <strong class="mono">${s.count}</strong>
+        </div>
+      `).join('');
+
+      donutEl.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-around; width:100%; gap:12px;">
+          <svg viewBox="0 0 160 170" width="150" height="160" role="img" aria-label="Delivery status funnel donut chart">
+            <circle cx="80" cy="85" r="${r}" fill="none" stroke="var(--border)" stroke-width="18" />
+            ${arcs}
+            <text x="80" y="82" text-anchor="middle" font-family="var(--font-heading)" font-size="20" font-weight="800" fill="var(--ink)">${total}</text>
+            <text x="80" y="98" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="var(--muted)">ORDERS</text>
+          </svg>
+          <div style="display:flex; flex-direction:column; gap:5px; flex:1; max-width:150px;">${legend}</div>
+        </div>
+      `;
+    }
+  }
+
+  // 3. Throughput by Priority (Bar SVG)
+  const barsEl = document.getElementById('dash-chart-throughput-bars');
+  if (barsEl) {
+    if (STATE.deliveries.length === 0) {
+      barsEl.innerHTML = `<div class="chart-empty-state">No data yet</div>`;
+    } else {
+      const groups = [
+        { key: 'urgent', label: 'Urgent', color: '#B91C1C' },
+        { key: 'high', label: 'High', color: '#EA580C' },
+        { key: 'normal', label: 'Normal', color: '#F97316' },
+        { key: 'low', label: 'Low', color: '#5B6270' },
+      ];
+      const counts = groups.map((g) => ({
+        ...g,
+        count: STATE.deliveries.filter((d) => (d.priority || 'normal').toLowerCase() === g.key).length,
+      }));
+      const maxVal = Math.max(1, ...counts.map((c) => c.count));
+      barsEl.innerHTML = `
+        <svg viewBox="0 0 340 175" width="100%" height="175" role="img" aria-label="Delivery throughput by priority bar chart">
+          ${counts.map((c, idx) => {
+            const barH = Math.max(6, Math.round((c.count / maxVal) * 110));
+            const x = 32 + idx * 74;
+            const y = 140 - barH;
+            return `
+              <g>
+                <rect x="${x}" y="${y}" width="42" height="${barH}" rx="8" fill="${c.color}">
+                  <title>${c.label}: ${c.count} deliveries</title>
+                </rect>
+                <text x="${x + 21}" y="${y - 6}" text-anchor="middle" font-family="var(--font-mono)" font-size="11" font-weight="700" fill="var(--ink)">${c.count}</text>
+                <text x="${x + 21}" y="158" text-anchor="middle" font-family="var(--font-mono)" font-size="10.5" fill="var(--muted)">${c.label}</text>
+              </g>
+            `;
+          }).join('')}
+          <line x1="20" y1="140" x2="320" y2="140" stroke="var(--border)" />
+        </svg>
+      `;
+    }
+  }
+}
+
+function renderDashboardDeliveriesTable() {
+  const tbody = document.getElementById('dash-deliveries-tbody');
+  const countPill = document.getElementById('dash-table-count-pill');
+  const pagEl = document.getElementById('dash-deliveries-pagination');
+  if (!tbody) return;
+
+  const allRows = STATE.deliveries;
+  if (countPill) countPill.textContent = `${allRows.length} total`;
+
+  if (allRows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">No deliveries recorded yet.</td></tr>`;
+    if (pagEl) pagEl.classList.add('hidden');
+    return;
+  }
+
+  const pageSize = 200;
+  const totalPages = Math.max(1, Math.ceil(allRows.length / pageSize));
+  if (STATE.dashDeliveriesPage > totalPages) STATE.dashDeliveriesPage = totalPages;
+  const startIdx = (STATE.dashDeliveriesPage - 1) * pageSize;
+  const pageRows = allRows.slice(startIdx, startIdx + pageSize);
+
+  const driverMap = new Map(STATE.drivers.map((dr) => [dr.driver_id, dr]));
+
+  tbody.innerHTML = pageRows.map((d) => {
+    const sla = formatSlaCountdown(d.scheduled_time, d.status);
+    let assignedCell = `<span class="kpi-sub">Unassigned</span>`;
+    if (d.active_driver_id || d.active_vehicle_id) {
+      const drv = driverMap.get(d.active_driver_id);
+      const drvName = drv ? drv.name : (d.active_driver_id || 'Driver');
+      const initials = getInitials(drvName);
+      assignedCell = `
+        <div class="driver-cell">
+          <span class="initials-avatar" title="${escapeHtml(drvName)}">${escapeHtml(initials)}</span>
+          <div>
+            <div style="font-weight:700; font-size:12px;">${escapeHtml(drvName)}</div>
+            <div class="mono" style="font-size:11px; color:var(--muted);">${escapeHtml(d.active_vehicle_id || '')}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    const actionHtml = d.status === 'pending'
+      ? `<button type="button" class="btn btn-primary btn-xs" data-dispatch-delivery="${escapeHtml(d.delivery_id)}">${icon('dispatch', 12)}<span>Dispatch</span></button>`
+      : `<span class="mono" style="font-size:11px; color:var(--muted);">${escapeHtml(d.status)}</span>`;
+
+    return `
+      <tr>
+        <td class="mono"><strong>${escapeHtml(d.delivery_id)}</strong>${demoBadgeHtml(d.is_demo)}</td>
+        <td>${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)}</td>
+        <td class="mono">
+          <div>${escapeHtml(d.scheduled_time)}</div>
+          <span class="sla-countdown-chip ${sla.overdue ? 'overdue' : ''}">${escapeHtml(sla.text)}</span>
+        </td>
+        <td>${priorityBadgeHtml(d.priority)}</td>
+        <td>${statusBadgeHtml(d.status)}</td>
+        <td>${assignedCell}</td>
+        <td class="text-right">${actionHtml}</td>
+      </tr>
+    `;
+  }).join('');
+
+  if (pagEl) {
+    if (allRows.length > pageSize) {
+      pagEl.classList.remove('hidden');
+      pagEl.innerHTML = `
+        <span>Showing ${startIdx + 1}–${Math.min(allRows.length, startIdx + pageSize)} of ${allRows.length} rows</span>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-secondary btn-xs" data-dash-page="${STATE.dashDeliveriesPage - 1}" ${STATE.dashDeliveriesPage <= 1 ? 'disabled' : ''}>Prev</button>
+          <button type="button" class="btn btn-secondary btn-xs" data-dash-page="${STATE.dashDeliveriesPage + 1}" ${STATE.dashDeliveriesPage >= totalPages ? 'disabled' : ''}>Next</button>
+        </div>
+      `;
+    } else {
+      pagEl.classList.add('hidden');
+    }
+  }
+}
+
 function renderDeliveriesTable() {
   const tbody = document.getElementById('deliveries-tbody');
+  const pagEl = document.getElementById('deliveries-pagination');
   if (!tbody) return;
   const rows = STATE.filteredDeliveries;
 
@@ -457,15 +988,33 @@ function renderDeliveriesTable() {
         </td>
       </tr>
     `;
+    if (pagEl) pagEl.classList.add('hidden');
     return;
   }
 
-  tbody.innerHTML = rows
+  const pageSize = 200;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  if (STATE.deliveriesPage > totalPages) STATE.deliveriesPage = totalPages;
+  const startIdx = (STATE.deliveriesPage - 1) * pageSize;
+  const pageRows = rows.slice(startIdx, startIdx + pageSize);
+  const driverMap = new Map(STATE.drivers.map((dr) => [dr.driver_id, dr]));
+
+  tbody.innerHTML = pageRows
     .map((d) => {
-      const activeInfo =
-        d.active_vehicle_id && d.active_driver_id
-          ? `<code class="mono">${escapeHtml(d.active_vehicle_id)}</code> + <code class="mono">${escapeHtml(d.active_driver_id)}</code>`
-          : `<span class="kpi-sub">—</span>`;
+      const sla = formatSlaCountdown(d.scheduled_time, d.status);
+      let activeInfo = `<span class="kpi-sub">—</span>`;
+      if (d.active_vehicle_id && d.active_driver_id) {
+        const drv = driverMap.get(d.active_driver_id);
+        const drvName = drv ? drv.name : d.active_driver_id;
+        activeInfo = `
+          <div class="driver-cell">
+            <span class="initials-avatar" title="${escapeHtml(drvName)}">${escapeHtml(getInitials(drvName))}</span>
+            <div>
+              <code class="mono">${escapeHtml(d.active_vehicle_id)}</code> + <code class="mono">${escapeHtml(d.active_driver_id)}</code>
+            </div>
+          </div>
+        `;
+      }
 
       let actions = '';
       if (d.status === 'pending') {
@@ -488,7 +1037,7 @@ function renderDeliveriesTable() {
         `;
       } else if (d.status === 'in_transit') {
         actions = `
-          <button type="button" class="btn btn-primary btn-xs" style="background:#10B981; border-color:#059669;" data-transition-delivery="${escapeHtml(d.delivery_id)}" data-target-status="delivered">
+          <button type="button" class="btn btn-primary btn-xs" data-transition-delivery="${escapeHtml(d.delivery_id)}" data-target-status="delivered">
             ${icon('checkCircle', 12)}<span>Delivered</span>
           </button>
           <button type="button" class="btn btn-danger btn-xs" data-transition-delivery="${escapeHtml(d.delivery_id)}" data-target-status="cancelled">
@@ -501,9 +1050,12 @@ function renderDeliveriesTable() {
 
       return `
         <tr>
-          <td class="mono"><strong>${escapeHtml(d.delivery_id)}</strong>${d.is_demo ? ' <span class="badge" style="background:#8b5cf6; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; font-weight:700;">DEMO</span>' : ''}</td>
+          <td class="mono"><strong>${escapeHtml(d.delivery_id)}</strong>${demoBadgeHtml(d.is_demo)}</td>
           <td>${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)}</td>
-          <td class="mono">${escapeHtml(d.scheduled_time)}</td>
+          <td class="mono">
+            <div>${escapeHtml(d.scheduled_time)}</div>
+            <span class="sla-countdown-chip ${sla.overdue ? 'overdue' : ''}">${escapeHtml(sla.text)}</span>
+          </td>
           <td>${priorityBadgeHtml(d.priority)}</td>
           <td class="mono">${d.required_capacity != null ? `${escapeHtml(d.required_capacity)} kg` : '—'}</td>
           <td>${statusBadgeHtml(d.status)}</td>
@@ -513,6 +1065,21 @@ function renderDeliveriesTable() {
       `;
     })
     .join('');
+
+  if (pagEl) {
+    if (rows.length > pageSize) {
+      pagEl.classList.remove('hidden');
+      pagEl.innerHTML = `
+        <span>Showing ${startIdx + 1}–${Math.min(rows.length, startIdx + pageSize)} of ${rows.length} rows</span>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-secondary btn-xs" data-deliv-page="${STATE.deliveriesPage - 1}" ${STATE.deliveriesPage <= 1 ? 'disabled' : ''}>Prev</button>
+          <button type="button" class="btn btn-secondary btn-xs" data-deliv-page="${STATE.deliveriesPage + 1}" ${STATE.deliveriesPage >= totalPages ? 'disabled' : ''}>Next</button>
+        </div>
+      `;
+    } else {
+      pagEl.classList.add('hidden');
+    }
+  }
 }
 
 function getVehicleEligibility(v, delivery) {
@@ -563,7 +1130,6 @@ function renderDispatchConsole() {
   const pendingList = STATE.deliveries.filter((d) => d.status === 'pending');
   document.getElementById('dispatch-pending-count').textContent = `${pendingList.length} pending`;
 
-  // Auto-select first pending delivery if none selected or selected is no longer pending (unless user is testing duplicate submit)
   if (
     !STATE.dispatchSelectedDeliveryId &&
     pendingList.length > 0
@@ -598,7 +1164,7 @@ function renderDispatchConsole() {
               data-select-dispatch-delivery="${escapeHtml(d.delivery_id)}"
             >
               <div class="resource-option-top">
-                <span class="resource-id">${escapeHtml(d.delivery_id)}</span>
+                <span class="resource-id">${escapeHtml(d.delivery_id)}${demoBadgeHtml(d.is_demo)}</span>
                 ${priorityBadgeHtml(d.priority)}
               </div>
               <div>${escapeHtml(d.pickup)} &rarr; ${escapeHtml(d.dropoff)}</div>
@@ -628,7 +1194,7 @@ function renderDispatchConsole() {
     }
   }
 
-  // Update Advisor recommendations for selected delivery
+  // Update Advisor recommendations for selected delivery with Advisor score bar
   const advisorCard = document.getElementById('advisor-rec-card');
   if (advisorCard) {
     if (selectedDelivery && selectedDelivery.status === 'pending') {
@@ -642,7 +1208,11 @@ function renderDispatchConsole() {
             const reasonEl = document.getElementById('advisor-top-reason');
             if (scoreEl) scoreEl.textContent = `${top.total_score}% MATCH`;
             if (reasonEl) {
-              reasonEl.textContent = `Recommended Pair: Vehicle ${top.vehicle.vehicle_id} (${top.vehicle.type}, ${top.vehicle.capacity}kg, cap score ${top.capacity_fit_score}) + Driver ${top.driver.driver_id} (${top.driver.name}, fairness score ${top.driver_fairness_score}). Total score: ${top.total_score}/100. ${top.reason || ''}`;
+              const pctScore = Math.min(100, Math.max(0, Number(top.total_score) || 0));
+              reasonEl.innerHTML = `
+                <div>Recommended Pair: <strong>Vehicle ${escapeHtml(top.vehicle.vehicle_id)}</strong> (${escapeHtml(top.vehicle.type)}, ${escapeHtml(top.vehicle.capacity)}kg, cap score ${escapeHtml(top.capacity_fit_score)}) + <strong>Driver ${escapeHtml(top.driver.driver_id)}</strong> (${escapeHtml(top.driver.name)}, fairness score ${escapeHtml(top.driver_fairness_score)}).</div>
+                <div class="advisor-score-bar-track"><div class="advisor-score-bar-fill" style="width:${pctScore}%;"></div></div>
+              `;
             }
             STATE.topRecommendation = top;
           } else {
@@ -685,7 +1255,7 @@ function renderDispatchConsole() {
               aria-pressed="${isSelected}"
             >
               <div class="resource-option-top">
-                <span class="resource-id">${escapeHtml(v.vehicle_id)} · ${escapeHtml(v.registration_no)}</span>
+                <span class="resource-id">${escapeHtml(v.vehicle_id)} · ${escapeHtml(v.registration_no)}${demoBadgeHtml(v.is_demo)}</span>
                 ${statusBadgeHtml(v.status)}
               </div>
               <div>${escapeHtml(v.type)} (${escapeHtml(v.capacity)} kg)</div>
@@ -724,7 +1294,7 @@ function renderDispatchConsole() {
               aria-pressed="${isSelected}"
             >
               <div class="resource-option-top">
-                <span class="resource-id">${escapeHtml(dr.driver_id)} · ${escapeHtml(dr.name)}</span>
+                <span class="resource-id">${escapeHtml(dr.driver_id)} · ${escapeHtml(dr.name)}${demoBadgeHtml(dr.is_demo)}</span>
                 ${statusBadgeHtml(dr.availability_status)}
               </div>
               <div class="${check.eligible ? 'resource-eligible-note' : 'resource-reason'}">
@@ -787,7 +1357,7 @@ function renderFleetTable() {
         : `<span class="kpi-sub">—</span>`;
       return `
         <tr>
-          <td class="mono"><strong>${escapeHtml(v.vehicle_id)}</strong>${v.is_demo ? ' <span class="badge" style="background:#8b5cf6; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; font-weight:700;">DEMO</span>' : ''}</td>
+          <td class="mono"><strong>${escapeHtml(v.vehicle_id)}</strong>${demoBadgeHtml(v.is_demo)}</td>
           <td class="mono">${escapeHtml(v.registration_no)}</td>
           <td>${escapeHtml(v.type)}</td>
           <td class="mono">${escapeHtml(v.capacity)}</td>
@@ -840,27 +1410,21 @@ function renderDriversTable() {
       const activeDel = d.active_delivery_id
         ? `<code class="mono">${escapeHtml(d.active_delivery_id)}</code>`
         : `<span class="kpi-sub">—</span>`;
+      const initials = getInitials(d.name);
       return `
         <tr>
-          <td class="mono"><strong>${escapeHtml(d.driver_id)}</strong>${d.is_demo ? ' <span class="badge" style="background:#8b5cf6; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; font-weight:700;">DEMO</span>' : ''}</td>
-          <td>${escapeHtml(d.name)}</td>
+          <td class="mono"><strong>${escapeHtml(d.driver_id)}</strong>${demoBadgeHtml(d.is_demo)}</td>
+          <td>
+            <div class="driver-cell">
+              <span class="initials-avatar">${escapeHtml(initials)}</span>
+              <span>${escapeHtml(d.name)}</span>
+            </div>
+          </td>
           <td class="mono">
             <div>
               <span>${escapeHtml(d.phone_e164 || d.phone)}</span>
-              <button type="button" class="btn btn-ghost btn-xs ml-xs" data-edit-phone="${escapeHtml(d.driver_id)}" title="Update Phone Number" style="padding:1px 5px; font-size:11px; margin-left:4px;">
+              <button type="button" class="btn btn-ghost btn-xs ml-xs" data-edit-phone="${escapeHtml(d.driver_id)}" aria-label="Edit driver phone number" title="Update Phone Number" style="padding:1px 5px; font-size:11px; margin-left:4px;">
                 ${icon('edit', 10)}
-              </button>
-            </div>
-            <div class="mt-xs" style="display:flex; align-items:center; gap:4px; margin-top:3px;">
-              ${
-                d.phone_verification_status === 'verified'
-                  ? '<span class="badge badge-success" style="font-size:9px; padding:1px 4px;">VERIFIED</span>'
-                  : d.phone_verification_status === 'pending'
-                  ? '<span class="badge badge-warning" style="font-size:9px; padding:1px 4px;">CHALLENGE PENDING</span>'
-                  : '<span class="badge badge-neutral" style="font-size:9px; padding:1px 4px;">UNVERIFIED</span>'
-              }
-              <button type="button" class="btn btn-ghost btn-xs" data-verify-phone="${escapeHtml(d.driver_id)}" style="font-size:10px; padding:0 4px;" title="Challenge OTP">
-                Verify
               </button>
             </div>
           </td>
@@ -1827,7 +2391,7 @@ function updateAllDriverMarkers(drivers) {
       marker = window.L.marker([lat, lng], { icon: customIcon }).addTo(map);
       FLEET_MAP_STATE.markers.set(d.driver_id, marker);
     } else {
-      marker.setLatLng([lat, lng]);
+      animateMarkerBetweenRealFixes(marker, FLEET_MAP_STATE.circles.get(d.driver_id), [lat, lng]);
       marker.setIcon(customIcon);
     }
 
@@ -1905,6 +2469,118 @@ function focusDriverOnMap(driverId) {
   const latlng = marker.getLatLng();
   map.setView(latlng, 17, { animate: true });
   marker.openPopup();
+}
+
+function animateMarkerBetweenRealFixes(marker, circle, targetLatLng) {
+  if (!marker) return;
+  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const prev = marker.getLatLng();
+  const [targetLat, targetLng] = targetLatLng;
+  if (reducedMotion || !prev || (Math.abs(prev.lat - targetLat) < 1e-6 && Math.abs(prev.lng - targetLng) < 1e-6)) {
+    marker.setLatLng(targetLatLng);
+    if (circle) circle.setLatLng(targetLatLng);
+    return;
+  }
+  const startLat = prev.lat;
+  const startLng = prev.lng;
+  const startTs = performance.now();
+  const duration = 260;
+  function step(now) {
+    const t = Math.min(1, (now - startTs) / duration);
+    const curLat = startLat + (targetLat - startLat) * t;
+    const curLng = startLng + (targetLng - startLng) * t;
+    marker.setLatLng([curLat, curLng]);
+    if (circle) circle.setLatLng([curLat, curLng]);
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+const DASH_MAP_STATE = {
+  map: null,
+  markers: new Map(),
+  circles: new Map(),
+};
+
+async function updateDashboardLiveMap() {
+  const container = document.getElementById('dashboard-live-map');
+  if (!container || typeof window.L === 'undefined') return;
+
+  if (!DASH_MAP_STATE.map) {
+    DASH_MAP_STATE.map = window.L.map('dashboard-live-map', {
+      attributionControl: false,
+      zoomControl: true,
+    }).setView([12.9716, 77.5946], 12);
+
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxNativeZoom: 19,
+      maxZoom: 22,
+      subdomains: ['a', 'b', 'c'],
+    }).addTo(DASH_MAP_STATE.map);
+  } else {
+    setTimeout(() => {
+      try { DASH_MAP_STATE.map.invalidateSize(); } catch {}
+    }, 50);
+  }
+
+  try {
+    const data = await apiRequest('/tracking/drivers/live');
+    if (!data || !Array.isArray(data.drivers)) return;
+    const driversWithFixes = data.drivers.filter((d) => d.latest_fix);
+    const pillEl = document.getElementById('dash-map-driver-count');
+    if (pillEl) pillEl.textContent = `${driversWithFixes.length} active fixes`;
+
+    driversWithFixes.forEach((d) => {
+      const fix = d.latest_fix;
+      const lat = fix.latitude;
+      const lng = fix.longitude;
+      const isLive = d.status === 'live';
+      const color = isLive ? '#EA580C' : '#5B6270';
+
+      const pinIcon = window.L.divIcon({
+        className: 'dash-driver-pin',
+        html: `<div style="width:24px; height:24px; border-radius:50%; background:${color}; color:#FFFFFF; border:2px solid #FFFFFF; box-shadow:0 2px 6px rgba(22,24,29,0.25); font-family:var(--font-mono); font-size:9px; font-weight:800; display:flex; align-items:center; justify-content:center;">${escapeHtml(getInitials(d.driver_name))}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+
+      let m = DASH_MAP_STATE.markers.get(d.driver_id);
+      let c = DASH_MAP_STATE.circles.get(d.driver_id);
+      if (!m) {
+        m = window.L.marker([lat, lng], { icon: pinIcon }).addTo(DASH_MAP_STATE.map);
+        DASH_MAP_STATE.markers.set(d.driver_id, m);
+      } else {
+        animateMarkerBetweenRealFixes(m, c, [lat, lng]);
+        m.setIcon(pinIcon);
+      }
+      m.bindPopup(`<strong>${escapeHtml(d.driver_name)}</strong><br/>±${Number(fix.accuracy || 0).toFixed(1)}m · ${escapeHtml(d.status)}`);
+
+      if (!c) {
+        c = window.L.circle([lat, lng], {
+          radius: Number(fix.accuracy || 15),
+          color,
+          fillColor: color,
+          fillOpacity: 0.14,
+          weight: 1,
+        }).addTo(DASH_MAP_STATE.map);
+        DASH_MAP_STATE.circles.set(d.driver_id, c);
+      } else {
+        c.setRadius(Number(fix.accuracy || 15));
+        c.setStyle({ color, fillColor: color });
+      }
+    });
+  } catch (_) {}
+}
+
+function fitDashboardDrivers() {
+  const map = DASH_MAP_STATE.map;
+  if (!map) return;
+  const coords = [];
+  DASH_MAP_STATE.markers.forEach((m) => coords.push(m.getLatLng()));
+  if (coords.length > 0) {
+    const bounds = window.L.latLngBounds(coords);
+    map.fitBounds(bounds, { padding: [28, 28], maxZoom: 15 });
+  }
 }
 
 function fitAllFleetDrivers() {
@@ -3340,13 +4016,13 @@ function openEditDriverPhoneModal(driverId) {
 }
 
 function initTheme() {
-  const saved = localStorage.getItem('fleetwise_theme') || 'dark';
+  const saved = localStorage.getItem('fleetwise_theme') || 'light';
   document.documentElement.setAttribute('data-theme', saved);
   updateThemeBtn(saved);
 }
 
 function toggleTheme() {
-  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  const cur = document.documentElement.getAttribute('data-theme') || 'light';
   const next = cur === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('fleetwise_theme', next);
@@ -3355,7 +4031,9 @@ function toggleTheme() {
 
 function updateThemeBtn(theme) {
   const lbl = document.getElementById('theme-label');
+  const iconEl = document.getElementById('theme-icon');
   if (lbl) lbl.textContent = theme === 'dark' ? 'Dark' : 'Light';
+  if (iconEl) iconEl.innerHTML = icon(theme === 'dark' ? 'moon' : 'sun', 16);
 }
 
 let sseSource = null;
@@ -3392,7 +4070,7 @@ function setupSSE() {
 
 /* ==================== EVENT BINDINGS ==================== */
 function setupEventListeners() {
-  // Sidebar navigation
+  // Sidebar / Top Pill navigation
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       switchView(btn.getAttribute('data-view'));
@@ -3407,6 +4085,53 @@ function setupEventListeners() {
 
   // Dismiss global error
   document.getElementById('btn-dismiss-error')?.addEventListener('click', clearGlobalError);
+
+  // Dashboard Bento & Topbar Listeners
+  document.getElementById('btn-dash-fit-drivers')?.addEventListener('click', fitDashboardDrivers);
+  document.getElementById('btn-dash-view-blocked')?.addEventListener('click', () => {
+    document.getElementById('btn-view-blocked-queue')?.click();
+  });
+  document.getElementById('btn-dash-schedule-all')?.addEventListener('click', () => {
+    STATE.scheduleSelectedDate = null;
+    renderDashboardDateStrip();
+  });
+  document.getElementById('btn-notifications')?.addEventListener('click', () => {
+    switchView('analytics');
+    showToast('Switched to Analytics & Operational Anomaly Feed');
+  });
+  document.getElementById('global-search-input')?.addEventListener('input', async (e) => {
+    const q = e.target.value;
+    const delSearch = document.getElementById('deliveries-search');
+    if (delSearch) delSearch.value = q;
+    STATE.deliverySearchQuery = q;
+    await refreshFilteredDeliveries();
+    renderDeliveriesTable();
+    if (q.trim() && STATE.activeView === 'dashboard') {
+      switchView('deliveries');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    const schedBtn = e.target.closest('[data-schedule-date]');
+    if (schedBtn) {
+      const dt = schedBtn.getAttribute('data-schedule-date');
+      STATE.scheduleSelectedDate = STATE.scheduleSelectedDate === dt ? null : dt;
+      renderDashboardDateStrip();
+      return;
+    }
+    const dashPageBtn = e.target.closest('[data-dash-page]');
+    if (dashPageBtn && !dashPageBtn.disabled) {
+      STATE.dashDeliveriesPage = Math.max(1, Number(dashPageBtn.getAttribute('data-dash-page')) || 1);
+      renderDashboardDeliveriesTable();
+      return;
+    }
+    const delivPageBtn = e.target.closest('[data-deliv-page]');
+    if (delivPageBtn && !delivPageBtn.disabled) {
+      STATE.deliveriesPage = Math.max(1, Number(delivPageBtn.getAttribute('data-deliv-page')) || 1);
+      renderDeliveriesTable();
+      return;
+    }
+  });
 
   // Live Fleet Map toolbar & filters
   document.getElementById('btn-open-pair-driver-modal')?.addEventListener('click', openPairDriverModal);
@@ -3441,20 +4166,26 @@ function setupEventListeners() {
 
   // Operator name persistence
   const opInput = document.getElementById('operator-name-input');
+  const opAvatar = document.getElementById('operator-initials-chip');
   if (opInput) {
-    opInput.value = localStorage.getItem('fleetwise_operator_name') || '';
+    const savedOp = localStorage.getItem('fleetwise_operator_name') || '';
+    opInput.value = savedOp;
+    if (opAvatar) opAvatar.textContent = savedOp ? getInitials(savedOp) : 'OP';
     opInput.addEventListener('input', (e) => {
-      localStorage.setItem('fleetwise_operator_name', e.target.value.trim());
+      const v = e.target.value.trim();
+      localStorage.setItem('fleetwise_operator_name', v);
+      if (opAvatar) opAvatar.textContent = v ? getInitials(v) : 'OP';
     });
   }
 
   // Demo controls
   document.getElementById('btn-load-demo')?.addEventListener('click', async () => {
     try {
+      clearGlobalError();
       let coords = null;
       if (navigator.geolocation) {
         try {
-          const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 3000 }));
+          const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 1000 }));
           coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
         } catch (_) {}
       }
@@ -3465,37 +4196,39 @@ function setupEventListeners() {
       });
       if (res.status === 'already_loaded') {
         const counts = res.counts || {};
-        alert(`Demo data is already loaded (${counts.vehicles ?? 0} vehicles, ${counts.drivers ?? 0} drivers, ${counts.deliveries ?? 0} deliveries present).`);
+        showToast(`Demo data already loaded (${counts.vehicles ?? 0} vehicles, ${counts.drivers ?? 0} drivers, ${counts.deliveries ?? 0} deliveries).`);
       } else {
-        alert(`Demo data loaded successfully: ${res.vehicles ?? 12} vehicles, ${res.drivers ?? 15} drivers, ${res.deliveries ?? 25} deliveries.`);
+        showToast(`Demo data loaded: ${res.vehicles ?? 12} vehicles, ${res.drivers ?? 15} drivers, ${res.deliveries ?? 25} deliveries.`);
       }
       await refreshAllData();
     } catch (err) {
-      alert(`Failed to load demo data: ${err.message}`);
+      showGlobalError(err.code || 'ERROR', err.rawMessage || 'An unexpected error occurred.', err.requestId || '');
     }
   });
 
   document.getElementById('btn-clear-demo')?.addEventListener('click', async () => {
-    if (!confirm('Clear all demo data? Real vehicles and drivers will be preserved.')) return;
     try {
+      clearGlobalError();
       const res = await apiRequest('/demo/clear', { method: 'POST' });
       const del = res.deleted || {};
-      alert(`Demo data cleared: ${del.vehicles ?? 0} vehicles, ${del.drivers ?? 0} drivers, ${del.deliveries ?? 0} deliveries removed.`);
+      showToast(`Demo data cleared: ${del.vehicles ?? 0} vehicles, ${del.drivers ?? 0} drivers, ${del.deliveries ?? 0} deliveries removed.`);
       await refreshAllData();
     } catch (err) {
-      alert(`Failed to clear demo data: ${err.message}`);
+      showGlobalError(err.code || 'ERROR', err.rawMessage || 'An unexpected error occurred.', err.requestId || '');
     }
   });
 
   document.getElementById('btn-sim-toggle')?.addEventListener('click', async () => {
     try {
+      clearGlobalError();
       const res = await apiRequest('/demo/simulator/toggle', { method: 'POST' });
       const lbl = document.getElementById('sim-status-label');
       if (lbl) {
-        lbl.textContent = res.simulator_running ? `Sim: Step ${res.step}` : 'Sim: Paused';
+        lbl.textContent = res.is_simulator_running ? 'Sim: Running' : 'Sim: Paused';
       }
+      showToast(res.is_simulator_running ? 'Demo simulator started.' : 'Demo simulator paused.');
     } catch (err) {
-      alert(`Simulator toggle failed: ${err.message}`);
+      showGlobalError(err.code || 'ERROR', err.rawMessage || 'An unexpected error occurred.', err.requestId || '');
     }
   });
 

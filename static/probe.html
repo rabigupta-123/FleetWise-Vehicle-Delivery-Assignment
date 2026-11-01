@@ -1,11 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FleetWise // Device & Battery Capability Probe</title>
-  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/styles.css">
   <style>
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-sans);
+    }
     .probe-container {
       max-width: 980px;
       margin: 32px auto;
@@ -13,38 +19,41 @@
     }
     .probe-header {
       margin-bottom: 24px;
-      border-bottom: 1px solid var(--color-border);
+      border-bottom: 1px solid var(--border);
       padding-bottom: 16px;
     }
     .probe-title {
       font-size: 24px;
       font-weight: 800;
       letter-spacing: -0.02em;
-      color: var(--color-foreground);
+      color: var(--ink);
       display: flex;
       align-items: center;
       gap: 10px;
+      flex-wrap: wrap;
     }
     .probe-badge {
       font-size: 11px;
-      padding: 3px 8px;
-      border-radius: 9999px;
+      padding: 4px 10px;
+      border-radius: 999px;
       font-family: var(--font-mono);
-      background: rgba(0, 240, 255, 0.12);
-      color: #00F0FF;
-      border: 1px solid rgba(0, 240, 255, 0.3);
+      font-weight: 700;
+      background: var(--orange-100);
+      color: var(--ink);
+      border: 1px solid rgba(234, 88, 12, 0.35);
     }
     .probe-section {
-      background: var(--color-card);
-      border: 1px solid var(--color-border);
-      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
       padding: 20px;
       margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
     }
     .probe-section-title {
       font-size: 16px;
       font-weight: 700;
-      color: #A5F3FC;
+      color: var(--ink);
       margin-bottom: 16px;
       display: flex;
       align-items: center;
@@ -60,32 +69,32 @@
       justify-content: space-between;
       align-items: center;
       padding: 10px 14px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 8px;
+      background: var(--surface-subtle);
+      border: 1px solid var(--border);
+      border-radius: 12px;
       font-size: 13px;
     }
     .probe-label {
-      color: var(--color-muted-foreground);
+      color: var(--muted);
     }
     .probe-value {
       font-family: var(--font-mono);
       font-weight: 600;
-      color: var(--color-foreground);
+      color: var(--ink);
       word-break: break-all;
       text-align: right;
     }
     .probe-value.suspect {
-      color: #FBBF24;
+      color: var(--warning);
     }
     .probe-value.confirmed {
-      color: #34D399;
+      color: var(--success);
     }
     .probe-value.unavailable {
-      color: #94A3B8;
+      color: var(--muted);
     }
     .probe-value.error {
-      color: #F87171;
+      color: var(--danger);
     }
     .probe-actions {
       display: flex;
@@ -94,43 +103,44 @@
       flex-wrap: wrap;
     }
     .probe-btn {
-      padding: 8px 16px;
-      border-radius: 8px;
+      padding: 10px 18px;
+      border-radius: 999px;
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      min-height: 44px;
       border: 1px solid transparent;
       transition: all 0.15s ease;
     }
     .probe-btn-primary {
-      background: #00F0FF;
-      color: #050B14;
+      background: var(--orange-700);
+      color: #FFFFFF;
     }
     .probe-btn-primary:hover {
-      background: #38BDF8;
+      background: #9A3412;
     }
     .probe-btn-secondary {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--color-foreground);
-      border-color: var(--color-border);
+      background: var(--surface-subtle);
+      color: var(--ink);
+      border-color: var(--border-strong);
     }
     .probe-btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: var(--orange-100);
     }
     .raw-json-box {
       margin-top: 16px;
-      background: #030712;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
+      background: var(--dark-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
       padding: 12px;
       font-family: var(--font-mono);
       font-size: 12px;
       max-height: 260px;
       overflow-y: auto;
-      color: #94A3B8;
+      color: #F4F5F8;
       white-space: pre-wrap;
       word-break: break-all;
     }
@@ -138,13 +148,13 @@
       margin-top: 12px;
       font-family: var(--font-mono);
       font-size: 11px;
-      color: #64748B;
+      color: var(--muted);
       max-height: 120px;
       overflow-y: auto;
     }
     .probe-log-entry {
       padding: 3px 0;
-      border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+      border-bottom: 1px dashed var(--border);
     }
   </style>
 </head>
@@ -155,7 +165,7 @@
         <span>FLEETWISE // DEVICE &amp; BATTERY CAPABILITY PROBE</span>
         <span class="probe-badge">TRUTHFULNESS COMPLIANT</span>
       </div>
-      <p style="color:var(--color-muted-foreground); font-size:13px; margin-top:6px;">
+      <p style="color:var(--muted); font-size:13px; margin-top:6px;">
         Queries the current browser runtime directly. Values reflect strictly what APIs return without synthetic defaults or false causes.
       </p>
     </div>

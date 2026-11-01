@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FLEETWISE — Vehicle &amp; Delivery Assignment Control Room</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238B5CF6' stroke-width='2'><polygon points='3 11 22 2 13 21 11 13 3 11'/></svg>" />
+  <title>FleetWise — Vehicle &amp; Delivery Assignment Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23EA580C' stroke-width='2'><polygon points='3 11 22 2 13 21 11 13 3 11'/></svg>" />
   <link rel="stylesheet" href="/static/css/tokens.css" />
   <link rel="stylesheet" href="/static/css/styles.css" />
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
@@ -13,24 +13,78 @@
   <a href="#main-content" class="skip-link">Skip to main content</a>
 
   <div class="app-shell">
-    <!-- Sidebar Navigation -->
+    <!-- Top Brand & Utility Bar -->
+    <div class="topbar-header">
+      <div class="topbar-upper">
+        <div class="brand-cluster">
+          <div class="brand-emblem" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">FleetWise</span>
+            <span class="brand-tag" id="hero-lan-pill">FLEETWISE // LOCAL DEMO MODE</span>
+          </div>
+          <span class="access-mode-badge" id="access-mode-badge" title="Current access security boundary">LOCAL DEMO MODE</span>
+        </div>
+
+        <div class="topbar-utilities">
+          <!-- Global Search Field -->
+          <div class="global-search-wrap">
+            <span class="search-icon" data-icon="search"></span>
+            <input
+              type="search"
+              id="global-search-input"
+              class="global-search-input"
+              placeholder="Search deliveries, fleet, drivers..."
+              aria-label="Global search across deliveries, vehicles, and drivers"
+            />
+          </div>
+
+          <!-- Notification Icon Button -->
+          <button type="button" class="icon-btn" id="btn-notifications" aria-label="View system notifications and anomalies" title="Notifications &amp; Anomalies">
+            <span data-icon="bell"></span>
+          </button>
+
+          <!-- Real-Time SSE Status Badge -->
+          <div class="telemetry-pill" id="sse-pill" role="status" aria-live="polite" title="Real-time Server-Sent Events stream with polling fallback">
+            <span class="telemetry-dot" id="telemetry-dot" aria-hidden="true"></span>
+            <span class="telemetry-text" id="telemetry-status">LIVE SSE</span>
+            <span class="telemetry-time" id="telemetry-time">--:--:--</span>
+          </div>
+
+          <!-- Optional Self-Declared Operator Name Chip -->
+          <div class="operator-chip" title="Self-declared operator name attached to audit events">
+            <span class="operator-avatar" id="operator-initials-chip">OP</span>
+            <input
+              type="text"
+              id="operator-name-input"
+              style="border:none; background:transparent; color:var(--ink); font-size:12px; font-weight:600; width:110px; outline:none;"
+              placeholder="Operator name"
+              aria-label="Self-declared operator name"
+            />
+          </div>
+
+          <!-- Theme Toggle (Light Default / Dark Opt-in) -->
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-theme-toggle" aria-label="Toggle light or dark theme" title="Toggle Theme (Light / Dark)">
+            <span data-icon="sun" id="theme-icon"></span>
+            <span class="hide-sm" id="theme-label">Light</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pill-Shaped Navigation Tabs (Collapses to Bottom Nav under 768px) -->
     <aside class="sidebar" id="sidebar" aria-label="Primary Navigation">
       <div class="sidebar-brand">
-        <div class="brand-emblem" aria-hidden="true">
-          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="3 11 22 2 13 21 11 13 3 11"/>
-          </svg>
-        </div>
-        <div class="brand-text">
-          <span class="brand-name"><span class="gradient-text">FLEETWISE</span></span>
-          <span class="brand-tag">AUTONOMOUS LOGISTICS // v2.4</span>
-        </div>
+        <span class="brand-name">FleetWise</span>
       </div>
 
       <nav class="sidebar-nav" role="navigation" aria-label="Main Sections">
         <button type="button" class="nav-item active" data-view="dashboard" aria-current="page">
           <span class="nav-icon" data-icon="dashboard"></span>
-          <span class="nav-label">Command Center</span>
+          <span class="nav-label">Dashboard</span>
           <kbd class="nav-kbd">1</kbd>
         </button>
         <button type="button" class="nav-item" data-view="deliveries">
@@ -40,12 +94,12 @@
         </button>
         <button type="button" class="nav-item" data-view="dispatch">
           <span class="nav-icon" data-icon="dispatch"></span>
-          <span class="nav-label">Dispatch Console</span>
+          <span class="nav-label">Dispatch</span>
           <span class="nav-badge nav-badge-accent" id="nav-badge-pending">0</span>
         </button>
         <button type="button" class="nav-item" data-view="fleet">
           <span class="nav-icon" data-icon="truck"></span>
-          <span class="nav-label">Fleet Vehicles</span>
+          <span class="nav-label">Fleet</span>
           <span class="nav-badge" id="nav-badge-fleet">0</span>
         </button>
         <button type="button" class="nav-item" data-view="drivers">
@@ -53,50 +107,50 @@
           <span class="nav-label">Drivers</span>
           <span class="nav-badge" id="nav-badge-drivers">0</span>
         </button>
-        <button type="button" class="nav-item" data-view="import">
-          <span class="nav-icon" data-icon="upload"></span>
-          <span class="nav-label">Import Data</span>
-          <kbd class="nav-kbd">I</kbd>
-        </button>
-        <button type="button" class="nav-item" data-view="racelab">
-          <span class="nav-icon" data-icon="zap"></span>
-          <span class="nav-label">Race Lab (Proof)</span>
-          <kbd class="nav-kbd">L</kbd>
+        <button type="button" class="nav-item" data-view="driver-gps">
+          <span class="nav-icon" data-icon="navigation"></span>
+          <span class="nav-label">Live Map</span>
+          <span class="nav-badge nav-badge-accent">GPS</span>
         </button>
         <button type="button" class="nav-item" data-view="analytics">
           <span class="nav-icon" data-icon="activity"></span>
           <span class="nav-label">Analytics</span>
           <kbd class="nav-kbd">Y</kbd>
         </button>
-        <button type="button" class="nav-item" data-view="routes">
-          <span class="nav-icon" data-icon="navigation"></span>
-          <span class="nav-label">Route Radar</span>
-          <kbd class="nav-kbd">M</kbd>
+        <button type="button" class="nav-item" data-view="import">
+          <span class="nav-icon" data-icon="upload"></span>
+          <span class="nav-label">Import</span>
+          <kbd class="nav-kbd">I</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="audit">
+          <span class="nav-icon" data-icon="audit"></span>
+          <span class="nav-label">Audit</span>
+          <kbd class="nav-kbd">A</kbd>
+        </button>
+        <button type="button" class="nav-item" data-view="racelab">
+          <span class="nav-icon" data-icon="zap"></span>
+          <span class="nav-label">Race Lab</span>
+          <kbd class="nav-kbd">L</kbd>
         </button>
         <button type="button" class="nav-item" data-view="vehicle-tracking">
           <span class="nav-icon" data-icon="truck"></span>
-          <span class="nav-label">Vehicle Tracking</span>
+          <span class="nav-label">Vehicle GPS</span>
           <span class="nav-badge" id="nav-badge-veh-tracking">Live</span>
         </button>
         <button type="button" class="nav-item" data-view="delivery-tracking">
           <span class="nav-icon" data-icon="navigation"></span>
-          <span class="nav-label">Delivery Tracking</span>
-          <span class="nav-badge" id="nav-badge-del-tracking">GPS</span>
+          <span class="nav-label">Corridors</span>
+          <span class="nav-badge" id="nav-badge-del-tracking">Trail</span>
         </button>
-        <button type="button" class="nav-item" data-view="driver-gps">
-          <span class="nav-icon" data-icon="zap"></span>
-          <span class="nav-label">Driver Phone GPS</span>
-          <span class="nav-badge nav-badge-accent">Mobile</span>
+        <button type="button" class="nav-item" data-view="routes">
+          <span class="nav-icon" data-icon="navigation"></span>
+          <span class="nav-label">Routes</span>
+          <kbd class="nav-kbd">M</kbd>
         </button>
         <button type="button" class="nav-item" data-view="devices">
-          <span class="nav-icon" data-icon="activity"></span>
-          <span class="nav-label">Device Inventory</span>
+          <span class="nav-icon" data-icon="smartphone"></span>
+          <span class="nav-label">Devices</span>
           <span class="nav-badge" id="nav-badge-devices">0</span>
-        </button>
-        <button type="button" class="nav-item" data-view="audit">
-          <span class="nav-icon" data-icon="audit"></span>
-          <span class="nav-label">Audit Log</span>
-          <kbd class="nav-kbd">A</kbd>
         </button>
       </nav>
 
@@ -113,33 +167,19 @@
 
     <!-- Main Content Area -->
     <div class="main-wrapper">
-      <!-- Top Header -->
+      <!-- Secondary Context & Quick Actions Bar -->
       <header class="topbar">
         <div class="topbar-left">
           <button type="button" class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle navigation menu" aria-expanded="false">
             <span data-icon="menu"></span>
           </button>
           <div>
-            <h1 class="page-title" id="page-title">Command Center</h1>
-            <p class="page-subtitle" id="page-subtitle">Real-time fleet telemetry, active delivery lanes &amp; conflict-free resource allocation</p>
+            <h1 class="page-title" id="page-title">Dashboard</h1>
+            <p class="page-subtitle" id="page-subtitle">Real-time fleet operations, dispatch queue, live GPS map, and scheduled deliveries</p>
           </div>
         </div>
 
         <div class="topbar-right">
-          <!-- Real-Time SSE Indicator -->
-          <div class="telemetry-pill" id="sse-pill" role="status" aria-live="polite" title="Real-time Server-Sent Events stream with polling fallback">
-            <span class="telemetry-dot" id="telemetry-dot" aria-hidden="true"></span>
-            <span class="telemetry-text" id="telemetry-status">LIVE SSE</span>
-            <span class="telemetry-time" id="telemetry-time">--:--:--</span>
-          </div>
-
-          <!-- Theme Toggle -->
-          <button type="button" class="btn btn-ghost btn-sm" id="btn-theme-toggle" aria-label="Toggle dark / light theme" title="Toggle Theme (Dark / Light)">
-            <span data-icon="wrench" id="theme-icon"></span>
-            <span class="hide-sm" id="theme-label">Theme</span>
-          </button>
-
-          <!-- Shortcuts Dialog Trigger -->
           <button type="button" class="btn btn-ghost btn-sm" id="btn-shortcuts" aria-label="View keyboard shortcuts (?)" title="Keyboard shortcuts (?)">
             <kbd class="kbd-hint">?</kbd>
           </button>
@@ -149,9 +189,9 @@
             <span class="hide-sm">Sync</span>
           </button>
 
-          <button type="button" class="btn btn-secondary btn-sm" id="btn-open-share" aria-label="Share Link & Mobile QR Code" title="Share Public Link & Mobile QR Code">
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-open-share" aria-label="Share Link &amp; Mobile QR Code" title="Share Public Link &amp; Mobile QR Code">
             <span data-icon="share"></span>
-            <span class="hide-sm">Share &amp; QR</span>
+            <span class="hide-sm">Pair &amp; QR</span>
           </button>
 
           <button type="button" class="btn btn-secondary btn-sm" id="btn-cmd-palette" aria-label="Open Command Palette (Ctrl+K)">
@@ -159,10 +199,6 @@
             <span class="hide-sm">Command</span>
             <kbd class="kbd-hint">Ctrl+K</kbd>
           </button>
-
-          <div class="operator-input-container" style="display: inline-flex; align-items: center; margin-right: 4px;">
-            <input type="text" id="operator-name-input" class="form-input" style="height: 30px; font-size: 11px; padding: 2px 8px; width: 140px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);" placeholder="Operator (Unauth)" title="Self-declared unauthenticated operator name attached to audit events" />
-          </div>
 
           <button type="button" class="btn btn-secondary btn-sm" id="btn-load-demo" title="Load synthetic demo fleet &amp; deliveries">
             <span data-icon="play"></span>
@@ -181,17 +217,21 @@
             <span data-icon="dispatch"></span>
             <span>Dispatch</span>
           </button>
+          <!-- Keep legacy hero action buttons hidden/accessible for event hooks -->
+          <button type="button" class="hidden" id="btn-hero-dispatch" aria-hidden="true"></button>
+          <button type="button" class="hidden" id="btn-hero-share" aria-hidden="true"></button>
+          <button type="button" class="hidden" id="btn-hero-radar" aria-hidden="true"></button>
         </div>
       </header>
 
-      <!-- LAN Share Security Warning Banner -->
-      <div id="share-lan-banner" class="server-error-banner hidden" style="background: rgba(220, 38, 38, 0.95); border-color: #b91c1c; color: #ffffff;" role="alert" aria-live="polite">
+      <!-- LAN Share Security Warning Banner ("SHARING ON LAN") -->
+      <div id="share-lan-banner" class="server-error-banner hidden" style="background: #FEE2E2; border-color: #FCA5A5; color: #B91C1C;" role="alert" aria-live="polite">
         <div class="server-error-content">
           <span class="server-error-icon" data-icon="shieldAlert"></span>
           <div class="server-error-text">
-            <span class="server-error-code" style="background: #7f1d1d; color: #fff;">SECURITY WARNING (--share)</span>
-            <span class="server-error-message" style="color: #fff; font-weight: 500;">
-              Anyone on this local network can view and control FleetWise without authentication. Do not use on untrusted Wi-Fi.
+            <span class="server-error-code" style="background: #B91C1C; color: #FFFFFF;">SHARING ON LAN (--share)</span>
+            <span class="server-error-message" style="color: #B91C1C; font-weight: 700;">
+              Anyone on this network can control FleetWise. Do not use on untrusted Wi-Fi.
             </span>
           </div>
         </div>
@@ -213,78 +253,56 @@
 
       <!-- Main Viewport -->
       <main id="main-content" class="viewport" tabindex="-1">
-        <!-- ==================== VIEW 1: COMMAND CENTER ==================== -->
+        <!-- ==================== VIEW 1: DASHBOARD BENTO GRID ==================== -->
         <section id="view-dashboard" class="view-section active" aria-labelledby="page-title">
-          <!-- Layers AI Inspired Modern Hero Section -->
-          <div class="layers-hero-banner mb-xl">
-            <div class="layers-hero-content">
-              <div class="layers-hero-badges mb-sm">
-                <span class="layers-pill"><span class="pulse-dot"></span> AUTONOMOUS DISPATCH v2.4</span>
-                <span class="layers-pill layers-pill-glass">SQLITE WAL &bull; BEGIN IMMEDIATE</span>
-                <span class="layers-pill layers-pill-glass" id="hero-lan-pill">LAN: INITIALIZING</span>
-              </div>
-              <h2 class="layers-hero-title">Conflict-Free Fleet &amp; Real-Time Telemetry Control Room</h2>
-              <p class="layers-hero-sub">
-                Cinematic dispatch coordination, atomic resource reservation, sub-second GPS smartphone telemetry, and automated vehicle routing.
-              </p>
-              <div class="layers-pill-row">
-                <span class="layers-pill"><span class="layers-pill-dot"></span> 100% Conflict-Free</span>
-                <span class="layers-pill"><span class="layers-pill-dot"></span> Sub-Second Live GPS</span>
-                <span class="layers-pill"><span class="layers-pill-dot"></span> Zero Fabricated Telemetry</span>
-                <span class="layers-pill"><span class="layers-pill-dot"></span> 44 Verified Endpoints</span>
-              </div>
-              <div class="layers-hero-actions mt-md">
-                <button type="button" class="btn btn-primary" id="btn-hero-dispatch">
-                  <span data-icon="dispatch"></span><span>Launch Dispatch Assistant</span>
-                </button>
-                <button type="button" class="btn btn-secondary" id="btn-hero-share">
-                  <span data-icon="share"></span><span>Connect Mobile Phone GPS</span>
-                </button>
-                <button type="button" class="btn btn-ghost" id="btn-hero-radar">
-                  <span data-icon="navigation"></span><span>Live Fleet Radar</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <!-- Bento KPI Row -->
+          <!-- Row 1: 4 KPI Cards with Period Change Pill (n/a when no history) -->
           <div class="bento-grid">
             <article class="kpi-card" aria-label="Available Fleet">
               <div class="kpi-header">
-                <span class="kpi-label">AVAILABLE FLEET</span>
+                <span class="kpi-label">Available Fleet</span>
                 <span class="kpi-icon kpi-icon-success" data-icon="truck"></span>
               </div>
               <div class="kpi-value-row">
-                <span class="kpi-value tabular" id="kpi-available-fleet">0</span>
-                <span class="kpi-sub tabular" id="kpi-fleet-breakdown">/ 0 total vehicles</span>
+                <div>
+                  <span class="kpi-value tabular" id="kpi-available-fleet">0</span>
+                  <span class="kpi-sub tabular" id="kpi-fleet-breakdown">/ 0 total</span>
+                </div>
+                <span class="kpi-delta-pill" id="kpi-delta-fleet" title="Change vs previous snapshot">n/a</span>
               </div>
               <div class="kpi-meta" id="kpi-fleet-detail">0 assigned · 0 maintenance</div>
             </article>
 
             <article class="kpi-card" aria-label="Active Deliveries">
               <div class="kpi-header">
-                <span class="kpi-label">ACTIVE DELIVERIES</span>
+                <span class="kpi-label">Active Deliveries</span>
                 <span class="kpi-icon kpi-icon-info" data-icon="navigation"></span>
               </div>
               <div class="kpi-value-row">
-                <span class="kpi-value tabular" id="kpi-active-deliveries">0</span>
-                <span class="kpi-sub tabular" id="kpi-pending-count">0 pending</span>
+                <div>
+                  <span class="kpi-value tabular" id="kpi-active-deliveries">0</span>
+                  <span class="kpi-sub tabular" id="kpi-pending-count">0 pending</span>
+                </div>
+                <span class="kpi-delta-pill" id="kpi-delta-active" title="Change vs previous snapshot">n/a</span>
               </div>
-              <div class="kpi-meta" id="kpi-active-detail">Assigned + In Transit (blocking)</div>
+              <div class="kpi-meta" id="kpi-active-detail">Assigned + In Transit</div>
             </article>
 
-            <article class="kpi-card" aria-label="Completed Deliveries">
+            <article class="kpi-card" aria-label="Delivered Orders">
               <div class="kpi-header">
-                <span class="kpi-label">DELIVERED COUNT</span>
+                <span class="kpi-label">Delivered</span>
                 <span class="kpi-icon kpi-icon-primary" data-icon="checkCircle"></span>
               </div>
               <div class="kpi-value-row">
-                <span class="kpi-value tabular" id="kpi-delivered-count">0</span>
-                <span class="kpi-sub tabular" id="kpi-cancelled-count">0 cancelled</span>
+                <div>
+                  <span class="kpi-value tabular" id="kpi-delivered-count">0</span>
+                  <span class="kpi-sub tabular" id="kpi-cancelled-count">0 cancelled</span>
+                </div>
+                <span class="kpi-delta-pill" id="kpi-delta-delivered" title="Change vs previous snapshot">n/a</span>
               </div>
-              <div class="kpi-meta">Resources released &amp; non-blocking</div>
+              <div class="kpi-meta">Completed &amp; resources released</div>
             </article>
 
-            <article class="kpi-card kpi-card-ring" aria-label="Fleet Utilisation Percentage">
+            <article class="kpi-card kpi-card-ring" aria-label="Fleet Utilisation">
               <div class="ring-container">
                 <svg class="utilisation-ring" viewBox="0 0 80 80" role="img" aria-label="Fleet utilisation gauge">
                   <circle class="ring-track" cx="40" cy="40" r="32" />
@@ -293,9 +311,135 @@
                 <div class="ring-center tabular" id="kpi-utilisation-pct">0%</div>
               </div>
               <div class="ring-info">
-                <span class="kpi-label">FLEET UTILISATION</span>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                  <span class="kpi-label">Utilisation</span>
+                  <span class="kpi-delta-pill" id="kpi-delta-utilisation" title="Change vs previous snapshot">n/a</span>
+                </div>
                 <div class="kpi-meta" id="kpi-driver-summary">0 / 0 drivers available</div>
                 <div class="utilisation-zone-badge" id="kpi-utilisation-zone">IDLE ZONE (0%)</div>
+              </div>
+            </article>
+          </div>
+
+          <!-- Row 2: Bento Feature Row (Next Dispatch Orange Card + Live Map Card + Dark Contrast Today's Deliveries Card) -->
+          <div class="dashboard-bento-main">
+            <!-- 1. Large Orange Feature Card: Next Dispatch + Blocked Queue Count -->
+            <article class="bento-orange-feature" aria-label="Next Dispatch Priority Queue">
+              <div class="bento-orange-header">
+                <span class="bento-orange-tag">
+                  <span data-icon="zap"></span>
+                  <span>Next Dispatch</span>
+                </span>
+                <span class="bento-blocked-pill" id="dash-blocked-pill" title="Pending deliveries blocked by resource constraints">
+                  Blocked: <strong id="dash-blocked-count" class="tabular">0</strong>
+                </span>
+              </div>
+
+              <div>
+                <h2 class="bento-orange-title" id="dash-next-dispatch-title">No pending deliveries</h2>
+              </div>
+
+              <div class="bento-orange-body" id="dash-next-dispatch-body">
+                <div class="bento-orange-route" id="dash-next-dispatch-route">Queue is clear — create or import deliveries to dispatch.</div>
+                <div class="bento-orange-meta" id="dash-next-dispatch-meta">
+                  <span>Priority: n/a</span>
+                  <span>Capacity: n/a</span>
+                </div>
+              </div>
+
+              <div class="bento-orange-actions">
+                <button type="button" class="btn-on-orange" id="btn-dash-next-dispatch">
+                  <span data-icon="dispatch"></span>
+                  <span>Dispatch Now</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-dash-view-blocked" style="background:rgba(255,255,255,0.92); color:#16181D; border-color:transparent;">
+                  <span>Inspect Queue</span>
+                </button>
+              </div>
+            </article>
+
+            <!-- 2. Live Map Card (Light Tiles, Driver Markers, Accuracy Circles, Fit All Drivers) -->
+            <article class="bento-map-card" aria-label="Live Fleet GPS Map">
+              <div class="section-header" style="margin-bottom:0;">
+                <div class="section-title-group">
+                  <h2 class="section-title">Live Fleet Map</h2>
+                  <span class="section-pill" id="dash-map-driver-count">0 active fixes</span>
+                </div>
+                <div class="section-actions">
+                  <button type="button" class="btn btn-secondary btn-xs" id="btn-dash-fit-drivers" aria-label="Fit all drivers on map">
+                    <span data-icon="navigation"></span>
+                    <span>Fit all drivers</span>
+                  </button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-goto-view="driver-gps">
+                    <span>Full Map</span>
+                  </button>
+                </div>
+              </div>
+              <div id="dashboard-live-map" class="dashboard-mini-map" role="region" aria-label="Interactive fleet map with driver markers and accuracy circles"></div>
+            </article>
+
+            <!-- 3. Dark Contrast Card (#14161B): Today's Deliveries with SLA Countdown Chips -->
+            <article class="bento-dark-card" aria-label="Today's Deliveries and SLA Countdowns">
+              <div class="bento-dark-header">
+                <h2 class="bento-dark-title">Today's Deliveries</h2>
+                <span class="bento-dark-count tabular" id="dash-todays-count">0</span>
+              </div>
+              <div class="todays-sla-list" id="dash-todays-sla-list">
+                <div class="sla-item">
+                  <div class="sla-item-route">No deliveries scheduled for today yet.</div>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:var(--dark-card-muted);">
+                <span>Real-time SLA monitor</span>
+                <button type="button" class="btn btn-xs" style="background:var(--orange-700); color:#FFFFFF;" data-goto-view="deliveries">View All</button>
+              </div>
+            </article>
+          </div>
+
+          <!-- Row 3: Horizontal Date-Strip Schedule (Week Strip) -->
+          <section class="date-strip-card" aria-label="Weekly Delivery Schedule Strip">
+            <div class="section-header" style="margin-bottom:0;">
+              <div class="section-title-group">
+                <h2 class="section-title">Schedule — 7-Day Strip</h2>
+                <span class="section-pill" id="dash-schedule-selected-label">All Scheduled Dates</span>
+              </div>
+              <div class="section-actions">
+                <button type="button" class="btn btn-ghost btn-xs" id="btn-dash-schedule-all">Show All Days</button>
+              </div>
+            </div>
+            <div class="date-strip-row" id="dash-date-strip" role="tablist" aria-label="Select day of week"></div>
+            <div class="date-strip-results" id="dash-date-strip-results"></div>
+          </section>
+
+          <!-- Row 4: Inline SVG Charts (Utilisation Over Time Area, Status Funnel Donut, Throughput Bars) -->
+          <div class="dashboard-charts-grid">
+            <article class="dashboard-chart-card" aria-label="Utilisation Over Time Chart">
+              <div class="section-header" style="margin-bottom:0;">
+                <h2 class="section-title">Utilisation Over Time</h2>
+                <span class="section-pill">Area SVG</span>
+              </div>
+              <div id="dash-chart-util-area" class="svg-chart-container">
+                <div class="chart-empty-state">No data yet</div>
+              </div>
+            </article>
+
+            <article class="dashboard-chart-card" aria-label="Status Funnel Donut Chart">
+              <div class="section-header" style="margin-bottom:0;">
+                <h2 class="section-title">Status Funnel</h2>
+                <span class="section-pill">Donut SVG</span>
+              </div>
+              <div id="dash-chart-status-donut" class="svg-chart-container">
+                <div class="chart-empty-state">No data yet</div>
+              </div>
+            </article>
+
+            <article class="dashboard-chart-card" aria-label="Delivery Throughput Bar Chart">
+              <div class="section-header" style="margin-bottom:0;">
+                <h2 class="section-title">Throughput by Priority</h2>
+                <span class="section-pill">Bars SVG</span>
+              </div>
+              <div id="dash-chart-throughput-bars" class="svg-chart-container">
+                <div class="chart-empty-state">No data yet</div>
               </div>
             </article>
           </div>
@@ -323,11 +467,11 @@
             </div>
           </div>
 
-          <!-- 4-Lane Live Status Board -->
+          <!-- Dashboard Deliveries Table (with Initials Avatars, Status Pills, Priority Chips & Pagination > 200 rows) -->
           <div class="section-header">
             <div class="section-title-group">
-              <h2 class="section-title">LIVE OPERATIONS BOARD</h2>
-              <span class="section-pill">Active = Assigned | In Transit</span>
+              <h2 class="section-title">Recent Deliveries &amp; Assignments</h2>
+              <span class="section-pill" id="dash-table-count-pill">0 total</span>
             </div>
             <div class="section-actions">
               <button type="button" class="btn btn-secondary btn-sm" id="btn-dash-new-delivery">
@@ -338,6 +482,36 @@
                 <span data-icon="upload"></span>
                 <span>Import CSV/JSON</span>
               </button>
+            </div>
+          </div>
+
+          <div class="table-card" style="margin-bottom:24px;">
+            <div class="table-responsive">
+              <table class="data-table" aria-label="Dashboard Deliveries Overview">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Route (Pickup &rarr; Dropoff)</th>
+                    <th>Scheduled &bull; SLA</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Assigned Driver &amp; Vehicle</th>
+                    <th class="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="dash-deliveries-tbody">
+                  <tr><td colspan="7" class="empty-cell">No deliveries recorded yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="dash-deliveries-pagination" class="table-pagination-bar hidden"></div>
+          </div>
+
+          <!-- 4-Lane Live Status Board -->
+          <div class="section-header">
+            <div class="section-title-group">
+              <h2 class="section-title">Live Operations Board</h2>
+              <span class="section-pill">Active = Assigned | In Transit</span>
             </div>
           </div>
 
@@ -444,6 +618,7 @@
                 <tbody id="deliveries-tbody"></tbody>
               </table>
             </div>
+            <div id="deliveries-pagination" class="table-pagination-bar hidden"></div>
           </div>
         </section>
 

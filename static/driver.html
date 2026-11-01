@@ -1,24 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>FleetWise // Driver Portal & Telemetry Hub</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>FleetWise — Driver Portal &amp; Telemetry Hub</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/styles.css">
   <style>
-    :root {
-      --brand-primary: #7C3AED;
-      --brand-accent: #06B6D4;
-      --bg-dark: #0A0A14;
-      --card-bg: rgba(22, 22, 38, 0.85);
-      --border-glow: rgba(124, 58, 237, 0.3);
-    }
     body {
-      background: radial-gradient(circle at 50% 0%, #1E103A 0%, var(--bg-dark) 70%);
-      color: #E2E8F0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
       margin: 0;
-      padding: 16px;
+      padding: calc(16px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
       min-height: 100vh;
       box-sizing: border-box;
     }
@@ -27,47 +21,61 @@
       margin: 0 auto;
     }
     .driver-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border-glow);
-      border-radius: 16px;
-      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 22px;
       margin-bottom: 16px;
-      backdrop-filter: blur(12px);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      box-shadow: var(--shadow-md);
     }
     .header-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
+      gap: 10px;
     }
     .logo-badge {
+      font-family: var(--font-heading);
       font-weight: 800;
       font-size: 18px;
       letter-spacing: -0.02em;
-      background: linear-gradient(135deg, #A78BFA 0%, #06B6D4 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--ink);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-dot {
+      width: 28px;
+      height: 28px;
+      border-radius: 9px;
+      background: var(--orange-500);
+      color: var(--ink);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 800;
     }
     .live-chip {
+      font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 9999px;
-      background: rgba(16, 185, 129, 0.15);
-      color: #34D399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      display: flex;
+      padding: 5px 12px;
+      border-radius: var(--radius-pill);
+      background: var(--status-success-bg);
+      color: var(--status-success-fg);
+      border: 1px solid var(--status-success-border);
+      display: inline-flex;
       align-items: center;
       gap: 6px;
     }
     .live-chip::before {
       content: '';
-      width: 6px;
-      height: 6px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      background: #10B981;
-      box-shadow: 0 0 8px #10B981;
+      background: var(--success);
     }
     .metric-grid {
       display: grid;
@@ -76,124 +84,132 @@
       margin: 16px 0;
     }
     .metric-box {
-      background: rgba(15, 15, 26, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
     }
     .metric-label {
+      font-family: var(--font-mono);
       font-size: 11px;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: #94A3B8;
+      color: var(--muted);
       margin-bottom: 4px;
     }
     .metric-value {
+      font-family: var(--font-mono);
       font-size: 20px;
       font-weight: 800;
-      color: #F8FAFC;
+      color: var(--ink);
     }
     .metric-sub {
       font-size: 11px;
-      color: #64748B;
-      margin-top: 2px;
+      color: var(--muted);
+      margin-top: 4px;
     }
     .quality-pill {
       display: inline-block;
+      font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 700;
       padding: 2px 8px;
-      border-radius: 6px;
+      border-radius: var(--radius-pill);
       text-transform: uppercase;
     }
-    .quality-excellent { background: rgba(16, 185, 129, 0.2); color: #34D399; }
-    .quality-good { background: rgba(59, 130, 246, 0.2); color: #60A5FA; }
-    .quality-fair { background: rgba(245, 158, 11, 0.2); color: #FBBF24; }
-    .quality-poor { background: rgba(239, 68, 68, 0.2); color: #F87171; }
+    .quality-excellent { background: var(--status-success-bg); color: var(--status-success-fg); border: 1px solid var(--status-success-border); }
+    .quality-good { background: var(--status-info-bg); color: var(--status-info-fg); border: 1px solid var(--status-info-border); }
+    .quality-fair { background: var(--status-warning-bg); color: var(--status-warning-fg); border: 1px solid var(--status-warning-border); }
+    .quality-poor { background: var(--status-danger-bg); color: var(--status-danger-fg); border: 1px solid var(--status-danger-border); }
     .btn-action {
       width: 100%;
-      padding: 14px;
-      border-radius: 12px;
+      min-height: 48px;
+      padding: 14px 18px;
+      border-radius: var(--radius-pill);
+      font-family: var(--font-body);
       font-size: 15px;
       font-weight: 700;
-      border: none;
+      border: 1px solid transparent;
       cursor: pointer;
       display: flex;
       justify-content: center;
       align-items: center;
       gap: 8px;
-      transition: all 0.2s;
+      transition: all 0.18s ease;
     }
     .btn-start {
-      background: linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%);
-      color: white;
-      box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
+      background: var(--orange-700);
+      color: #FFFFFF;
+      border-color: var(--orange-700);
+      box-shadow: 0 4px 14px rgba(194, 65, 12, 0.25);
     }
     .btn-stop {
-      background: rgba(239, 68, 68, 0.15);
-      color: #F87171;
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: var(--status-danger-bg);
+      color: var(--status-danger-fg);
+      border: 1px solid var(--status-danger-border);
     }
     .warning-banner {
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      color: #FBBF24;
-      padding: 12px;
-      border-radius: 12px;
-      font-size: 12px;
+      background: var(--status-warning-bg);
+      border: 1px solid var(--status-warning-border);
+      color: var(--status-warning-fg);
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-size: 12.5px;
       margin-bottom: 16px;
       display: none;
     }
     .error-banner {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #F87171;
-      padding: 12px;
-      border-radius: 12px;
-      font-size: 12px;
+      background: var(--status-danger-bg);
+      border: 1px solid var(--status-danger-border);
+      color: var(--status-danger-fg);
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-size: 12.5px;
       margin-bottom: 16px;
       display: none;
     }
     .transparency-drawer {
       margin-top: 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      border-top: 1px solid var(--border);
       padding-top: 12px;
     }
     .transparency-btn {
       background: none;
       border: none;
-      color: #94A3B8;
-      font-size: 12px;
-      font-weight: 600;
+      color: var(--ink);
+      font-size: 12.5px;
+      font-weight: 700;
       cursor: pointer;
-      padding: 0;
+      padding: 10px 0;
+      min-height: 44px;
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
     }
     .json-box {
-      background: #05050A;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
+      background: var(--dark-card);
+      border: 1px solid var(--dark-card-border);
+      border-radius: 14px;
       padding: 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
-      color: #A5F3FC;
+      color: #FFFFFF;
       max-height: 200px;
       overflow-y: auto;
       margin-top: 8px;
       display: none;
     }
     .copy-btn {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #E2E8F0;
-      font-size: 11px;
-      padding: 4px 8px;
-      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--ink);
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 8px 14px;
+      min-height: 44px;
+      border-radius: var(--radius-pill);
       cursor: pointer;
-      float: right;
-      margin-bottom: 4px;
     }
   </style>
 </head>
@@ -201,30 +217,30 @@
   <div class="driver-container">
     <!-- Browser / Context Warning -->
     <div id="in-app-warning" class="warning-banner">
-      ⚠️ <strong>In-App Browser Detected:</strong> Location updates may stall when minimized. Tap <strong>•••</strong> and choose <strong>"Open in Chrome / Safari"</strong> for reliable background telemetry.
+      <strong>In-App Browser Detected:</strong> Location updates may stall when minimized. Tap <strong>•••</strong> and choose <strong>"Open in Chrome / Safari"</strong> for reliable background telemetry.
     </div>
 
     <div id="insecure-warning" class="error-banner">
-      🔒 <strong>Insecure HTTP Context:</strong> Modern mobile browsers strictly forbid GPS location access over unencrypted HTTP. Connect via HTTPS (:8443) or localhost.
+      <strong>Insecure HTTP Context:</strong> Modern mobile browsers strictly forbid GPS location access over unencrypted HTTP. Connect via HTTPS (:8443) or localhost.
     </div>
 
     <div id="token-error" class="error-banner">
-      🚫 <strong>Pairing Token Error:</strong> <span id="token-error-msg">Invalid or missing pairing token. Scan the QR code from the FleetWise desktop dashboard.</span>
+      <strong>Pairing Token Error:</strong> <span id="token-error-msg">Invalid or missing pairing token. Scan the QR code from the FleetWise desktop dashboard.</span>
     </div>
 
     <!-- Main Active Card -->
     <div class="driver-card">
       <div class="header-row">
-        <div class="logo-badge">⚡ FleetWise Mobile</div>
+        <div class="logo-badge"><span class="logo-dot">FW</span> <span>FleetWise Driver</span></div>
         <div id="stream-status" class="live-chip">STANDBY</div>
       </div>
 
-      <div id="driver-identity-banner" style="font-size: 15px; font-weight: 600; color: #38BDF8; margin-bottom: 6px;">
+      <div id="driver-identity-banner" style="font-size: 15px; font-weight: 800; color: var(--orange-700); margin-bottom: 6px;">
         You are <span id="driver-name-display">Authorized Fleet Driver</span>
       </div>
 
-      <div style="font-size: 12px; color: #94A3B8; margin-bottom: 10px;">
-        Driver Token: <span id="token-display" style="font-family: monospace; color: #C084FC;">Checking...</span>
+      <div style="font-size: 12px; color: var(--muted); margin-bottom: 12px;">
+        Driver Token: <span id="token-display" style="font-family: var(--font-mono); font-weight: 700; color: var(--ink);">Checking...</span>
       </div>
 
       <!-- Real-time Metrics -->
@@ -251,16 +267,16 @@
         </div>
       </div>
 
-      <!-- Main Action Button -->
+      <!-- Main Action Button (>= 44px touch target) -->
       <button id="btn-toggle-stream" class="btn-action btn-start">
         <span id="btn-icon">▶</span> <span id="btn-text">Start Location Streaming</span>
       </button>
 
       <!-- Transparency Drawer -->
       <div class="transparency-drawer">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
           <button id="toggle-json-btn" class="transparency-btn">
-            👁️ What my phone shares with FleetWise ▼
+            <span>What my phone shares with FleetWise ▼</span>
           </button>
           <button id="copy-json-btn" class="copy-btn" style="display: none;">Copy JSON</button>
         </div>
@@ -289,47 +305,46 @@
     let activeDeliveryId = null;
     let isDemoDriver = false;
 
-    // Parse Pairing Token from URL
+    // Parse Pairing Token from URL (if not yet stripped by 303 session cookie redirect)
     const urlParams = new URLSearchParams(window.location.search);
     pairingToken = urlParams.get("pair") || urlParams.get("token");
 
     const tokenDisplay = document.getElementById("token-display");
-    if (pairingToken) {
-      tokenDisplay.textContent = pairingToken.substring(0, 10) + "... (Validating)";
-      // Fetch paired driver profile and tracking session
-      fetch(`/api/driver/session?pair=${encodeURIComponent(pairingToken)}`, {
-        headers: { "x-device-id": deviceId }
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "ok") {
-          activeDriverId = data.driver_id;
-          activeDriverName = data.driver_name;
-          activeSessionId = data.session_id || "TRK-DRIVER-MOBILE";
-          activeVehicleId = data.vehicle_id;
-          activeVehicleReg = data.vehicle_reg;
-          activeDeliveryId = data.delivery_id;
-          isDemoDriver = Boolean(data.is_demo);
+    tokenDisplay.textContent = "Validating Session...";
+    const sessUrl = pairingToken ? `/api/driver/session?pair=${encodeURIComponent(pairingToken)}` : `/api/driver/session`;
+    fetch(sessUrl, {
+      credentials: "same-origin",
+      headers: { "x-device-id": deviceId }
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === "ok") {
+        activeDriverId = data.driver_id;
+        activeDriverName = data.driver_name;
+        activeSessionId = data.session_id || "TRK-DRIVER-MOBILE";
+        activeVehicleId = data.vehicle_id;
+        activeVehicleReg = data.vehicle_reg;
+        activeDeliveryId = data.delivery_id;
+        isDemoDriver = Boolean(data.is_demo);
 
-          const nameDisp = document.getElementById("driver-name-display");
-          if (nameDisp) {
-            let label = activeDriverName;
-            if (activeVehicleReg) label += ` [Vehicle: ${activeVehicleReg}]`;
-            nameDisp.textContent = label;
-          }
-          tokenDisplay.textContent = pairingToken.substring(0, 10) + "... (Active)";
-        } else {
-          document.getElementById("token-error-msg").textContent = data.message || "Invalid or expired token.";
-          document.getElementById("token-error").style.display = "block";
+        const nameDisp = document.getElementById("driver-name-display");
+        if (nameDisp) {
+          let label = activeDriverName;
+          if (activeVehicleReg) label += ` [Vehicle: ${activeVehicleReg}]`;
+          nameDisp.textContent = label;
         }
-      })
-      .catch(err => {
-        console.warn("Session check fallback:", err);
-      });
-    } else {
-      tokenDisplay.textContent = "NO TOKEN DETECTED";
-      document.getElementById("token-error").style.display = "block";
-    }
+        tokenDisplay.textContent = pairingToken ? (pairingToken.substring(0, 10) + "... (Active)") : "HttpOnly Session (Active)";
+        document.getElementById("token-error").style.display = "none";
+      } else {
+        tokenDisplay.textContent = "SESSION INACTIVE";
+        document.getElementById("token-error-msg").textContent = data.message || "Invalid or expired pairing token.";
+        document.getElementById("token-error").style.display = "block";
+      }
+    })
+    .catch(err => {
+      console.warn("Session check fallback:", err);
+      tokenDisplay.textContent = "SESSION ERROR";
+    });
 
     // 1. Secure Context Check
     if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
