@@ -2328,6 +2328,20 @@ function renderDriverFleetList(drivers) {
       </span>
     ` : '<span class="kpi-sub" style="font-size:10px;">Unassigned</span>';
 
+    const dev = d.device;
+    const caps = (dev && dev.capabilities) || {};
+    const batPct = caps.battery_pct || (caps.battery && caps.battery.value != null ? `${caps.battery.value}%` : null);
+    const batChg = caps.battery && caps.battery.is_charging ? '⚡' : '🔋';
+    const netType = caps.network_type || (caps.network && caps.network.effective_type) || null;
+    const phoneLabel = dev && (dev.model || dev.os_family) ? `${dev.model || 'Phone'} (${dev.os_family || ''})` : null;
+    const phoneTelemetryLine = (batPct || netType || phoneLabel) ? `
+      <div class="kpi-sub" style="font-size:10px; display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; padding-top:3px; border-top:1px dashed var(--color-border);">
+        ${batPct ? `<span>${batChg} ${escapeHtml(batPct)}</span>` : ''}
+        ${netType ? `<span>📶 ${escapeHtml(netType)}</span>` : ''}
+        ${phoneLabel ? `<span>📱 ${escapeHtml(phoneLabel)}</span>` : ''}
+      </div>
+    ` : '';
+
     return `
       <div class="driver-fleet-card p-xs" data-driver-id="${escapeHtml(d.driver_id)}"
            style="background:var(--color-card); border:1px solid ${isLive ? 'rgba(34, 197, 94, 0.4)' : (isStale ? 'rgba(234, 179, 8, 0.4)' : 'var(--color-border)')};
@@ -2342,6 +2356,7 @@ function renderDriverFleetList(drivers) {
           </span>
         </div>
         ${fixDetails}
+        ${phoneTelemetryLine}
       </div>
     `;
   }).join('');
@@ -2396,6 +2411,11 @@ function updateAllDriverMarkers(drivers) {
     }
 
     const v = d.vehicle;
+    const dev = d.device;
+    const caps = (dev && dev.capabilities) || {};
+    const batPct = caps.battery_pct || (caps.battery && caps.battery.value != null ? `${caps.battery.value}%` : 'n/a');
+    const batChg = caps.battery && caps.battery.is_charging ? '⚡ Charging' : (caps.battery && caps.battery.is_charging === false ? '🔋 Discharging' : '');
+    const netType = caps.network_type || (caps.network && caps.network.effective_type) || 'n/a';
     const spd = fix.speed != null ? `${(fix.speed * 3.6).toFixed(1)} km/h` : '0 km/h';
     const scoreTxt = fix.accuracy_score != null ? `${fix.accuracy_score}/100` : 'n/a';
     const r95Txt = fix.radius_95m != null ? `${fix.radius_95m} m` : 'n/a';
@@ -2410,6 +2430,7 @@ function updateAllDriverMarkers(drivers) {
         </div>
         <div><strong>Vehicle:</strong> ${v ? escapeHtml(v.registration_no || v.vehicle_id) : 'None'}</div>
         <div><strong>Speed:</strong> ${spd} · <strong>Heading:</strong> ${hdg.toFixed(0)}°</div>
+        <div><strong>Phone Battery:</strong> ${escapeHtml(batPct)} ${escapeHtml(batChg)} · <strong>Net:</strong> ${escapeHtml(netType)}</div>
         <div><strong>Raw Accuracy:</strong> ±${fix.accuracy.toFixed(1)} m</div>
         <div><strong>Accuracy Score:</strong> ${scoreTxt}</div>
         <div><strong>95% Radius:</strong> ${r95Txt} · <strong>50m Conf:</strong> ${confTxt}</div>
@@ -2623,9 +2644,12 @@ async function openPairDriverModal() {
 
   if (select) {
     select.innerHTML = '<option value="">-- Choose Driver to Pair --</option>' +
-      STATE.drivers.map(d => `<option value="${escapeHtml(d.driver_id)}">${escapeHtml(d.name)} (${escapeHtml(d.driver_id)})</option>`).join('');
+      STATE.drivers.map((d, i) => `<option value="${escapeHtml(d.driver_id)}" ${i === 0 ? 'selected' : ''}>${escapeHtml(d.name)} (${escapeHtml(d.driver_id)})</option>`).join('');
   }
   if (modal) modal.classList.remove('hidden');
+  if (select && select.value) {
+    generateDriverPairToken();
+  }
 }
 
 async function generateDriverPairToken() {
@@ -2648,13 +2672,18 @@ async function generateDriverPairToken() {
     const badgeEl = document.getElementById('pair-driver-name-badge');
     const resWrap = document.getElementById('pair-token-result');
 
-    if (urlInput) urlInput.value = res.url;
-    if (badgeEl) badgeEl.textContent = `${res.driver_name || res.driver_id} Bound`;
+    const primaryUrl = res.tunnel_url || res.url;
+    if (urlInput) urlInput.value = primaryUrl;
+    if (badgeEl) {
+      badgeEl.textContent = res.tunnel_url
+        ? `${res.driver_name || res.driver_id} Bound (Public HTTPS Tunnel Active)`
+        : `${res.driver_name || res.driver_id} Bound (LAN HTTPS :8443)`;
+    }
 
     if (qrContainer && window.QRCode) {
       qrContainer.innerHTML = '';
       new window.QRCode(qrContainer, {
-        text: res.url,
+        text: primaryUrl,
         width: 192,
         height: 192,
         colorDark: '#0f172a',
@@ -4841,15 +4870,20 @@ async function openShareModal() {
 
 function setShareTarget(target) {
   _currentShareTarget = target;
-  let targetUrl = window.location.origin;
+  let targetUrl = `${window.location.origin}/driver`;
 
   if (_cachedNetInfo) {
     if (target === 'lan-https') {
-      targetUrl = _cachedNetInfo.lan_https_url || `https://${_cachedNetInfo.local_ip}:8443`;
+      targetUrl = _cachedNetInfo.tunnel_driver_url
+        || _cachedNetInfo.driver_pairing_url
+        || `${_cachedNetInfo.lan_https_url || `https://${_cachedNetInfo.local_ip}:8443`}/driver`;
     } else if (target === 'lan-http') {
-      targetUrl = _cachedNetInfo.lan_url || `http://${_cachedNetInfo.local_ip}:8000`;
+      targetUrl = _cachedNetInfo.driver_pairing_url
+        || _cachedNetInfo.driver_http_pairing_url
+        || `${_cachedNetInfo.lan_url || `http://${_cachedNetInfo.local_ip}:8000`}/driver`;
     } else if (target === 'localhost') {
-      targetUrl = _cachedNetInfo.localhost_url || 'http://127.0.0.1:8000';
+      const pairQ = _cachedNetInfo.pairing_token ? `?pair=${_cachedNetInfo.pairing_token}` : '';
+      targetUrl = `${_cachedNetInfo.localhost_url || 'http://127.0.0.1:8000'}/driver${pairQ}`;
     }
   }
 

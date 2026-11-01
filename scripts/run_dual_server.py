@@ -10,10 +10,12 @@ Supports:
 import argparse
 import asyncio
 import os
+import re
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 # Ensure repository root is in python path
@@ -137,10 +139,78 @@ def print_access_table(lan_ip: str, pairing_token: str, share_mode: bool) -> Non
     print("-" * 80 + "\n")
 
 
+def start_ssh_public_tunnel(pairing_token: str) -> subprocess.Popen | None:
+    """
+    Starts a zero-install public HTTPS tunnel via Windows/system ssh (localhost.run)
+    so driver phones can connect over Public Wi-Fi or 4G/5G without Windows Firewall
+    or self-signed certificate blocks.
+    """
+    ssh_bin = shutil.which("ssh")
+    if not ssh_bin:
+        return None
+
+    tunnel_file = ROOT_DIR / ".tunnel_url"
+    try:
+        if tunnel_file.exists():
+            tunnel_file.unlink()
+    except Exception:
+        pass
+
+    try:
+        proc = subprocess.Popen(
+            [
+                ssh_bin,
+                "-T",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "ServerAliveInterval=30",
+                "-R", "80:127.0.0.1:8000",
+                "nokey@localhost.run",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception as e:
+        print(f" [!] Could not start SSH tunnel: {e}")
+        return None
+
+    def _reader():
+        url_pattern = re.compile(r"(https://[a-zA-Z0-9.-]+\.lhr\.life)")
+        if not proc.stdout:
+            return
+        announced = False
+        for line in proc.stdout:
+            m = url_pattern.search(line)
+            if m and not announced:
+                announced = True
+                pub_url = m.group(1).rstrip("/")
+                os.environ["FLEETWISE_TUNNEL_URL"] = pub_url
+                try:
+                    tunnel_file.write_text(pub_url, encoding="utf-8")
+                except Exception:
+                    pass
+                pair_url = f"{pub_url}/driver?pair={pairing_token}"
+                print("\n" + "=" * 80)
+                print(" PUBLIC HTTPS PHONE TUNNEL ACTIVE (WORKS ON ANY WI-FI OR 4G/5G)")
+                print("=" * 80)
+                print(f" Phone Driver Portal : {pair_url}")
+                print(f" Phone GPS Probe     : {pub_url}/probe")
+                print("=" * 80)
+                print_qr_code(pair_url)
+                print("=" * 80 + "\n", flush=True)
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    return proc
+
+
 async def run_dual_servers(
     share_mode: bool = False,
     override_ip: str | None = None,
-    use_tunnel: bool = False,
+    use_tunnel: bool = True,
 ):
     if share_mode:
         os.environ["FLEETWISE_SHARE_LAN"] = "1"
@@ -152,7 +222,7 @@ async def run_dual_servers(
         print(f" [i] Revoked {revoked_n} previously issued pairing token(s).")
 
     lan_ip = detect_primary_lan_ip(override_ip)
-    pairing_token = generate_pairing_token(driver_id=None, valid_minutes=10)
+    pairing_token = generate_pairing_token(driver_id=None, valid_minutes=1440)
 
     # 1. Ensure SAN certificates exist and include selected LAN IP
     ensure_valid_certs()
@@ -160,7 +230,7 @@ async def run_dual_servers(
 
     print_access_table(lan_ip, pairing_token, share_mode)
 
-    # Optional cloudflared tunnel
+    # Start public HTTPS tunnel (cloudflared or built-in ssh localhost.run)
     tunnel_proc = None
     if use_tunnel:
         cpath = shutil.which("cloudflared")
@@ -176,8 +246,8 @@ async def run_dual_servers(
                 print("     cloudflared process started (tunneling https://localhost:8443).")
             except Exception as e:
                 print(f"     [!] Failed to start cloudflared: {e}")
-        else:
-            print(" [!] cloudflared not found in system PATH. Install cloudflared to use --tunnel.")
+        if not tunnel_proc:
+            tunnel_proc = start_ssh_public_tunnel(pairing_token)
 
     # 2. HTTP Server (Port 8000)
     # If share mode is on, bind 0.0.0.0; otherwise bind 127.0.0.1 for desktop dashboard
@@ -217,7 +287,8 @@ def main():
     parser = argparse.ArgumentParser(description="FleetWise Dual Server Launcher")
     parser.add_argument("--share", action="store_true", help="Open dashboard access to LAN clients (Insecure Hackathon Mode)")
     parser.add_argument("--ip", type=str, default=None, help="Explicitly specify primary LAN IPv4 address")
-    parser.add_argument("--tunnel", action="store_true", help="Launch secure cloudflared public tunnel for remote driver testing")
+    parser.add_argument("--tunnel", action="store_true", default=True, help="Launch secure public HTTPS tunnel for mobile phone pairing (default: True)")
+    parser.add_argument("--no-tunnel", action="store_false", dest="tunnel", help="Disable public HTTPS tunnel")
     args = parser.parse_args()
 
     try:

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>FleetWise — Driver Portal &amp; Telemetry Hub</title>
+  <title>FleetWise — Driver Portal &amp; Phone Telemetry Hub</title>
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/styles.css">
   <style>
@@ -17,14 +17,14 @@
       box-sizing: border-box;
     }
     .driver-container {
-      max-width: 540px;
+      max-width: 560px;
       margin: 0 auto;
     }
     .driver-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-card);
-      padding: 22px;
+      padding: 20px;
       margin-bottom: 16px;
       box-shadow: var(--shadow-md);
     }
@@ -81,13 +81,13 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
-      margin: 16px 0;
+      margin: 14px 0;
     }
     .metric-box {
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 16px;
-      padding: 14px;
+      padding: 13px;
     }
     .metric-label {
       font-family: var(--font-mono);
@@ -100,7 +100,7 @@
     }
     .metric-value {
       font-family: var(--font-mono);
-      font-size: 20px;
+      font-size: 19px;
       font-weight: 800;
       color: var(--ink);
     }
@@ -149,6 +149,12 @@
       color: var(--status-danger-fg);
       border: 1px solid var(--status-danger-border);
     }
+    .btn-perm {
+      background: var(--ink);
+      color: #FFFFFF;
+      border-color: var(--ink);
+      margin-bottom: 10px;
+    }
     .warning-banner {
       background: var(--status-warning-bg);
       border: 1px solid var(--status-warning-border);
@@ -168,6 +174,73 @@
       font-size: 12.5px;
       margin-bottom: 16px;
       display: none;
+    }
+    .perm-card {
+      background: var(--orange-100);
+      border: 1px solid var(--orange-500);
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .perm-title {
+      font-weight: 800;
+      font-size: 13.5px;
+      color: var(--ink);
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .perm-checklist {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 8px 0 12px 0;
+      font-size: 11.5px;
+      color: var(--ink);
+    }
+    .perm-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 9px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+    }
+    .telemetry-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .telemetry-table td {
+      padding: 6px 4px;
+      border-bottom: 1px solid var(--border);
+    }
+    .telemetry-table td:first-child {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .telemetry-table td:last-child {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--ink);
+      text-align: right;
+    }
+    .driver-select {
+      width: 100%;
+      min-height: 44px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 13.5px;
+      font-weight: 700;
+      margin-top: 6px;
     }
     .transparency-drawer {
       margin-top: 16px;
@@ -195,7 +268,7 @@
       font-family: var(--font-mono);
       font-size: 11px;
       color: #FFFFFF;
-      max-height: 200px;
+      max-height: 240px;
       overflow-y: auto;
       margin-top: 8px;
       display: none;
@@ -221,7 +294,7 @@
     </div>
 
     <div id="insecure-warning" class="error-banner">
-      <strong>Insecure HTTP Context:</strong> Modern mobile browsers strictly forbid GPS location access over unencrypted HTTP. Connect via HTTPS (:8443) or localhost.
+      <strong>Insecure HTTP Context:</strong> Modern mobile browsers require HTTPS (:8443) or the Public HTTPS Tunnel link to grant GPS location &amp; sensor permissions.
     </div>
 
     <div id="token-error" class="error-banner">
@@ -235,15 +308,41 @@
         <div id="stream-status" class="live-chip">STANDBY</div>
       </div>
 
-      <div id="driver-identity-banner" style="font-size: 15px; font-weight: 800; color: var(--orange-700); margin-bottom: 6px;">
+      <div id="driver-identity-banner" style="font-size: 15px; font-weight: 800; color: var(--orange-700); margin-bottom: 4px;">
         You are <span id="driver-name-display">Authorized Fleet Driver</span>
       </div>
 
-      <div style="font-size: 12px; color: var(--muted); margin-bottom: 12px;">
+      <div style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
         Driver Token: <span id="token-display" style="font-family: var(--font-mono); font-weight: 700; color: var(--ink);">Checking...</span>
       </div>
 
-      <!-- Real-time Metrics -->
+      <!-- Optional Driver Switcher on Phone -->
+      <div id="driver-switcher-wrap" style="margin-bottom: 14px; display: none;">
+        <label for="phone-driver-select" style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted);">Active Driver Profile</label>
+        <select id="phone-driver-select" class="driver-select"></select>
+      </div>
+
+      <!-- Explicit Phone Permission Request Card (Battery, GPS, Motion, Network, Hardware) -->
+      <div id="permission-consent-card" class="perm-card">
+        <div class="perm-title">
+          <span>📱 Phone Permissions &amp; Full Sensor Access</span>
+          <span id="perm-summary-badge" class="quality-pill quality-fair">Action Required</span>
+        </div>
+        <div style="font-size: 12px; color: var(--ink); line-height: 1.4;">
+          Grant FleetWise permission to read your phone's <strong>Battery &amp; Power</strong>, <strong>High-Precision GPS</strong>, <strong>Compass &amp; Motion Sensors</strong>, <strong>Cellular/Wi-Fi Signal</strong>, and <strong>Device Hardware Diagnostics</strong>.
+        </div>
+        <div class="perm-checklist">
+          <div class="perm-item"><span>🔋 Battery &amp; Power</span> <span id="perm-bat-state" class="quality-pill quality-fair">Prompt</span></div>
+          <div class="perm-item"><span>📍 High-Acc GPS</span> <span id="perm-gps-state" class="quality-pill quality-fair">Prompt</span></div>
+          <div class="perm-item"><span>🧭 Motion/Compass</span> <span id="perm-mot-state" class="quality-pill quality-fair">Prompt</span></div>
+          <div class="perm-item"><span>📶 Net &amp; Hardware</span> <span id="perm-hw-state" class="quality-pill quality-good">Ready</span></div>
+        </div>
+        <button id="btn-grant-all-permissions" type="button" class="btn-action btn-perm">
+          <span>🔓</span> <span id="btn-grant-text">Allow All Phone Permissions (Battery, GPS &amp; Device)</span>
+        </button>
+      </div>
+
+      <!-- Real-time Core Metrics -->
       <div class="metric-grid">
         <div class="metric-box">
           <div class="metric-label">GPS Accuracy</div>
@@ -258,7 +357,15 @@
         <div class="metric-box">
           <div class="metric-label">Battery Level</div>
           <div id="bat-val" class="metric-value">--%</div>
-          <div id="bat-status" class="metric-sub">Checking API...</div>
+          <div id="bat-status" class="metric-sub">Tap Allow Above</div>
+          <!-- Manual Battery Reporter fallback for iOS/Safari -->
+          <div id="bat-manual-wrap" style="display: none; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 10.5px; color: var(--ink);">
+              <span>Set Battery:</span>
+              <input id="bat-manual-slider" type="range" min="1" max="100" value="88" style="width: 70px;">
+              <label style="display:inline-flex; align-items:center; gap:2px;"><input id="bat-manual-chg" type="checkbox">⚡</label>
+            </div>
+          </div>
         </div>
         <div class="metric-box">
           <div class="metric-label">Offline Buffer</div>
@@ -269,8 +376,30 @@
 
       <!-- Main Action Button (>= 44px touch target) -->
       <button id="btn-toggle-stream" class="btn-action btn-start">
-        <span id="btn-icon">▶</span> <span id="btn-text">Start Location Streaming</span>
+        <span id="btn-icon">▶</span> <span id="btn-text">Start Location &amp; Phone Telemetry Streaming</span>
       </button>
+
+      <!-- Full Phone Hardware, Sensor & Network Readout -->
+      <div style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <span style="font-size: 12.5px; font-weight: 800; color: var(--ink);">📊 Live Phone Diagnostics &amp; Sensor Feed</span>
+          <span id="sync-telemetry-chip" class="quality-pill quality-good">Waiting</span>
+        </div>
+        <table class="telemetry-table">
+          <tbody>
+            <tr><td>Phone Model &amp; OS</td><td id="tel-model-os">Detecting...</td></tr>
+            <tr><td>Browser &amp; Engine</td><td id="tel-browser">Detecting...</td></tr>
+            <tr><td>Battery &amp; Power State</td><td id="tel-battery">Checking...</td></tr>
+            <tr><td>Network / Signal</td><td id="tel-network">Checking...</td></tr>
+            <tr><td>Compass &amp; Tilt (α/β/γ)</td><td id="tel-motion">Waiting for sensor...</td></tr>
+            <tr><td>Accelerometer (X/Y/Z)</td><td id="tel-accel">Waiting for sensor...</td></tr>
+            <tr><td>CPU Cores &amp; Memory</td><td id="tel-cpu-ram">Checking...</td></tr>
+            <tr><td>Phone Storage Free/Quota</td><td id="tel-storage">Checking...</td></tr>
+            <tr><td>Display &amp; Touch Points</td><td id="tel-screen">Checking...</td></tr>
+            <tr><td>Screen Wake Lock</td><td id="tel-wakelock">Standby</td></tr>
+          </tbody>
+        </table>
+      </div>
 
       <!-- Transparency Drawer -->
       <div class="transparency-drawer">
@@ -291,11 +420,13 @@
     let watchId = null;
     let wakeLock = null;
     let pairingToken = null;
+    let sessionToken = localStorage.getItem("fleetwise_driver_session") || null;
     let deviceId = localStorage.getItem("fleetwise_device_id") || ("dev_" + Math.random().toString(36).substring(2, 10));
     localStorage.setItem("fleetwise_device_id", deviceId);
 
     let lastFix = null;
     let bufferedFixes = [];
+    let telemetryTimer = null;
 
     let activeDriverName = "Authorized Fleet Driver";
     let activeDriverId = null;
@@ -303,109 +434,518 @@
     let activeVehicleId = null;
     let activeVehicleReg = null;
     let activeDeliveryId = null;
-    let isDemoDriver = false;
 
-    // Parse Pairing Token from URL (if not yet stripped by 303 session cookie redirect)
+    const permissionStatus = {
+      battery: "prompt",
+      geolocation: "prompt",
+      motion: "prompt",
+      hardware: "granted",
+      full_device_access: false
+    };
+
+    let batteryState = {
+      value: null,
+      pct: null,
+      status: "unavailable",
+      is_charging: null,
+      charging_time_s: null,
+      discharging_time_s: null,
+      source: "BatteryManager",
+      reason: "Waiting for permission"
+    };
+
+    let networkState = {
+      online: navigator.onLine,
+      effective_type: null,
+      type: null,
+      downlink_mbps: null,
+      rtt_ms: null,
+      save_data: false
+    };
+
+    let motionState = {
+      compass_heading: null,
+      alpha: null,
+      beta: null,
+      gamma: null,
+      accel_x: null,
+      accel_y: null,
+      accel_z: null,
+      updated_at: null
+    };
+
+    let hardwareState = {
+      model: "Smartphone",
+      manufacturer: null,
+      os_family: "Mobile OS",
+      os_version: "",
+      browser_family: "Mobile Browser",
+      browser_version: "",
+      platform: navigator.platform || "",
+      cpu_cores: navigator.hardwareConcurrency || null,
+      device_memory_gb: navigator.deviceMemory || null,
+      storage_used_mb: null,
+      storage_quota_gb: null,
+      screen_res: `${window.screen.width}x${window.screen.height} @${window.devicePixelRatio || 1}x`,
+      max_touch_points: navigator.maxTouchPoints || 0,
+      language: navigator.language || "en",
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+    };
+
+    // Parse Pairing Token from URL
     const urlParams = new URLSearchParams(window.location.search);
     pairingToken = urlParams.get("pair") || urlParams.get("token");
 
-    const tokenDisplay = document.getElementById("token-display");
-    tokenDisplay.textContent = "Validating Session...";
-    const sessUrl = pairingToken ? `/api/driver/session?pair=${encodeURIComponent(pairingToken)}` : `/api/driver/session`;
-    fetch(sessUrl, {
-      credentials: "same-origin",
-      headers: { "x-device-id": deviceId }
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.status === "ok") {
-        activeDriverId = data.driver_id;
-        activeDriverName = data.driver_name;
-        activeSessionId = data.session_id || "TRK-DRIVER-MOBILE";
-        activeVehicleId = data.vehicle_id;
-        activeVehicleReg = data.vehicle_reg;
-        activeDeliveryId = data.delivery_id;
-        isDemoDriver = Boolean(data.is_demo);
+    function buildAuthHeaders(extra = {}) {
+      const h = {
+        "x-device-id": deviceId,
+        ...extra
+      };
+      if (pairingToken) h["x-pairing-token"] = pairingToken;
+      if (sessionToken) h["x-driver-session"] = sessionToken;
+      return h;
+    }
 
-        const nameDisp = document.getElementById("driver-name-display");
-        if (nameDisp) {
-          let label = activeDriverName;
-          if (activeVehicleReg) label += ` [Vehicle: ${activeVehicleReg}]`;
-          nameDisp.textContent = label;
+    function loadDriverSession(preferredDriverId = null) {
+      const tokenDisplay = document.getElementById("token-display");
+      tokenDisplay.textContent = "Validating Session...";
+      const q = new URLSearchParams();
+      if (pairingToken) q.set("pair", pairingToken);
+      if (preferredDriverId) q.set("driver_id", preferredDriverId);
+      const sessUrl = `/api/driver/session${q.toString() ? "?" + q.toString() : ""}`;
+
+      fetch(sessUrl, {
+        credentials: "same-origin",
+        headers: buildAuthHeaders()
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "ok") {
+          activeDriverId = data.driver_id;
+          activeDriverName = data.driver_name;
+          activeSessionId = data.session_id || "TRK-DRIVER-MOBILE";
+          activeVehicleId = data.vehicle_id;
+          activeVehicleReg = data.vehicle_reg;
+          activeDeliveryId = data.delivery_id;
+          if (data.session_token) {
+            sessionToken = data.session_token;
+            localStorage.setItem("fleetwise_driver_session", sessionToken);
+          }
+
+          const nameDisp = document.getElementById("driver-name-display");
+          if (nameDisp) {
+            let label = `${activeDriverName} (${activeDriverId})`;
+            if (activeVehicleReg) label += ` • ${activeVehicleReg}`;
+            nameDisp.textContent = label;
+          }
+          tokenDisplay.textContent = pairingToken ? (pairingToken.substring(0, 10) + "... (Paired)") : "Active Mobile Session";
+          document.getElementById("token-error").style.display = "none";
+
+          // Populate driver selector
+          if (Array.isArray(data.available_drivers) && data.available_drivers.length > 0) {
+            const wrap = document.getElementById("driver-switcher-wrap");
+            const sel = document.getElementById("phone-driver-select");
+            if (wrap && sel) {
+              wrap.style.display = "block";
+              sel.innerHTML = data.available_drivers.map(d =>
+                `<option value="${d.driver_id}" ${d.driver_id === activeDriverId ? "selected" : ""}>${d.name} (${d.driver_id}) — ${d.availability_status}</option>`
+              ).join("");
+            }
+          }
+
+          // Immediately sync initial hardware & battery telemetry
+          syncFullPhoneTelemetry();
+        } else {
+          tokenDisplay.textContent = "SESSION INACTIVE";
+          document.getElementById("token-error-msg").textContent = data.message || "Invalid or expired pairing token.";
+          document.getElementById("token-error").style.display = "block";
         }
-        tokenDisplay.textContent = pairingToken ? (pairingToken.substring(0, 10) + "... (Active)") : "HttpOnly Session (Active)";
-        document.getElementById("token-error").style.display = "none";
-      } else {
-        tokenDisplay.textContent = "SESSION INACTIVE";
-        document.getElementById("token-error-msg").textContent = data.message || "Invalid or expired pairing token.";
-        document.getElementById("token-error").style.display = "block";
+      })
+      .catch(err => {
+        console.warn("Session check error:", err);
+        tokenDisplay.textContent = "OFFLINE / RETRYING";
+      });
+    }
+
+    document.getElementById("phone-driver-select")?.addEventListener("change", (e) => {
+      const newDrvId = e.target.value;
+      if (newDrvId) {
+        loadDriverSession(newDrvId);
       }
-    })
-    .catch(err => {
-      console.warn("Session check fallback:", err);
-      tokenDisplay.textContent = "SESSION ERROR";
     });
+
+    loadDriverSession();
 
     // 1. Secure Context Check
     if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
       document.getElementById("insecure-warning").style.display = "block";
     }
 
-    // 2. In-App Browser Detection (WhatsApp, Instagram, FB, Line, etc.)
+    // 2. In-App Browser Detection
     const ua = navigator.userAgent || "";
     const isInApp = /FBAN|FBAV|Instagram|WhatsApp|Line|Twitter|MicroMessenger/i.test(ua);
     if (isInApp) {
       document.getElementById("in-app-warning").style.display = "block";
     }
 
-    // 3. Battery API telemetry
-    let batteryState = { value: null, status: "unavailable", source: "BatteryManager", reason: "API not supported" };
-    if ("getBattery" in navigator) {
-      navigator.getBattery().then(bat => {
-        const updateBat = () => {
-          batteryState = {
-            value: Math.round(bat.level * 100),
-            status: "measured",
-            is_charging: bat.charging,
-            source: "BatteryManager",
-            measured_at: new Date().toISOString()
-          };
-          document.getElementById("bat-val").textContent = batteryState.value + "%";
-          document.getElementById("bat-status").textContent = bat.charging ? "⚡ Charging" : "🔋 Discharging";
-          updateInspector();
-        };
-        updateBat();
-        bat.addEventListener("levelchange", updateBat);
-        bat.addEventListener("chargingchange", updateBat);
-      }).catch(err => {
-        batteryState = { value: null, status: "error", source: "BatteryManager", reason: err.message };
-      });
+    // 3. Parse User-Agent & High-Entropy Client Hints (Phone Model, OS, Browser)
+    async function probeHardwareAndStorage() {
+      // Parse fallback from UA
+      if (/Android\s+([0-9.]+)/i.test(ua)) {
+        hardwareState.os_family = "Android";
+        hardwareState.os_version = RegExp.$1;
+        const mMatch = ua.match(/Android\s+[0-9.]+;\s*([^;)]+)/i);
+        if (mMatch && mMatch[1]) {
+          hardwareState.model = mMatch[1].replace(/Build\/.*$/i, "").trim();
+        }
+      } else if (/iPhone|iPad|iPod/i.test(ua)) {
+        hardwareState.os_family = "iOS";
+        const vMatch = ua.match(/OS\s+([0-9_]+)/i);
+        if (vMatch) hardwareState.os_version = vMatch[1].replace(/_/g, ".");
+        hardwareState.model = /iPad/i.test(ua) ? "Apple iPad" : "Apple iPhone";
+      } else if (/Windows/i.test(ua)) {
+        hardwareState.os_family = "Windows";
+        hardwareState.model = "Desktop / Laptop";
+      }
+
+      if (/EdgA?\/([0-9.]+)/i.test(ua)) {
+        hardwareState.browser_family = "Edge";
+        hardwareState.browser_version = RegExp.$1;
+      } else if (/Chrome\/([0-9.]+)/i.test(ua) && !/Edg/i.test(ua)) {
+        hardwareState.browser_family = "Chrome";
+        hardwareState.browser_version = RegExp.$1;
+      } else if (/Version\/([0-9.]+).*Safari/i.test(ua)) {
+        hardwareState.browser_family = "Safari";
+        hardwareState.browser_version = RegExp.$1;
+      } else if (/Firefox\/([0-9.]+)/i.test(ua)) {
+        hardwareState.browser_family = "Firefox";
+        hardwareState.browser_version = RegExp.$1;
+      }
+
+      // High-Entropy Client Hints (Android Chrome exposes exact phone model & OS version)
+      if (navigator.userAgentData && typeof navigator.userAgentData.getHighEntropyValues === "function") {
+        try {
+          const hints = await navigator.userAgentData.getHighEntropyValues([
+            "model", "platform", "platformVersion", "architecture", "bitness", "fullVersionList"
+          ]);
+          if (hints.model) hardwareState.model = hints.model;
+          if (hints.platform) hardwareState.os_family = hints.platform;
+          if (hints.platformVersion) hardwareState.os_version = hints.platformVersion;
+        } catch (e) {
+          console.warn("Client hints restricted:", e);
+        }
+      }
+
+      // Storage Estimate
+      if (navigator.storage && typeof navigator.storage.estimate === "function") {
+        try {
+          const est = await navigator.storage.estimate();
+          if (est.usage !== undefined) hardwareState.storage_used_mb = Math.round(est.usage / (1024 * 1024));
+          if (est.quota !== undefined) hardwareState.storage_quota_gb = Number((est.quota / (1024 * 1024 * 1024)).toFixed(1));
+        } catch (e) {}
+      }
+
+      updateDiagnosticsTable();
     }
 
-    // 4. Wake Lock API (keep screen awake while driving)
+    // 4. Battery & Power Permission + Reader
+    async function requestBatteryTelemetry() {
+      if ("getBattery" in navigator) {
+        try {
+          const bat = await navigator.getBattery();
+          const updateBat = () => {
+            const pct = Math.round(bat.level * 100);
+            batteryState = {
+              value: pct,
+              pct: pct + "%",
+              status: "measured",
+              is_charging: Boolean(bat.charging),
+              charging_time_s: Number.isFinite(bat.chargingTime) ? bat.chargingTime : null,
+              discharging_time_s: Number.isFinite(bat.dischargingTime) ? bat.dischargingTime : null,
+              source: "BatteryManager",
+              measured_at: new Date().toISOString()
+            };
+            permissionStatus.battery = "granted";
+            document.getElementById("bat-val").textContent = pct + "%";
+            document.getElementById("bat-status").textContent = bat.charging ? "⚡ Charging" : "🔋 Discharging";
+            const badge = document.getElementById("perm-bat-state");
+            if (badge) { badge.textContent = "Granted"; badge.className = "quality-pill quality-excellent"; }
+            updateDiagnosticsTable();
+            updateInspector();
+          };
+          updateBat();
+          bat.addEventListener("levelchange", () => { updateBat(); syncFullPhoneTelemetry(); });
+          bat.addEventListener("chargingchange", () => { updateBat(); syncFullPhoneTelemetry(); });
+          return true;
+        } catch (err) {
+          batteryState = { value: null, status: "error", source: "BatteryManager", reason: err.message };
+        }
+      }
+      // Fallback for iOS Safari where navigator.getBattery is not exposed by WebKit
+      const manualWrap = document.getElementById("bat-manual-wrap");
+      if (manualWrap) manualWrap.style.display = "block";
+      const slider = document.getElementById("bat-manual-slider");
+      const chg = document.getElementById("bat-manual-chg");
+      const applyManualBat = () => {
+        const pct = Number(slider ? slider.value : 88);
+        const isChg = Boolean(chg && chg.checked);
+        batteryState = {
+          value: pct,
+          pct: pct + "%",
+          status: "user_reported",
+          is_charging: isChg,
+          source: "DriverPhoneReported",
+          measured_at: new Date().toISOString()
+        };
+        permissionStatus.battery = "granted";
+        document.getElementById("bat-val").textContent = pct + "%";
+        document.getElementById("bat-status").textContent = isChg ? "⚡ Charging (Reported)" : "🔋 Discharging (Reported)";
+        const badge = document.getElementById("perm-bat-state");
+        if (badge) { badge.textContent = "Active"; badge.className = "quality-pill quality-excellent"; }
+        updateDiagnosticsTable();
+        updateInspector();
+      };
+      applyManualBat();
+      slider?.addEventListener("input", applyManualBat);
+      slider?.addEventListener("change", () => { applyManualBat(); syncFullPhoneTelemetry(); });
+      chg?.addEventListener("change", () => { applyManualBat(); syncFullPhoneTelemetry(); });
+      return true;
+    }
+
+    // 5. Network Information API
+    function probeNetworkConnection() {
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      networkState.online = navigator.onLine;
+      if (conn) {
+        networkState.effective_type = (conn.effectiveType || "4g").toUpperCase();
+        networkState.type = conn.type || "cellular/wifi";
+        networkState.downlink_mbps = conn.downlink !== undefined ? conn.downlink : null;
+        networkState.rtt_ms = conn.rtt !== undefined ? conn.rtt : null;
+        networkState.save_data = Boolean(conn.saveData);
+      } else {
+        networkState.effective_type = navigator.onLine ? "ONLINE (Wi-Fi/Cell)" : "OFFLINE";
+      }
+      updateDiagnosticsTable();
+    }
+    window.addEventListener("online", () => { probeNetworkConnection(); flushBuffer(); });
+    window.addEventListener("offline", () => { probeNetworkConnection(); });
+    if (navigator.connection && typeof navigator.connection.addEventListener === "function") {
+      navigator.connection.addEventListener("change", probeNetworkConnection);
+    }
+
+    // 6. Motion, Orientation & Compass Sensors Permission + Listeners
+    let motionListenersAttached = false;
+    async function requestMotionAndCompassPermission() {
+      try {
+        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+          const res = await DeviceOrientationEvent.requestPermission();
+          if (res !== "granted") {
+            permissionStatus.motion = "denied";
+            return false;
+          }
+        }
+        if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+          await DeviceMotionEvent.requestPermission();
+        }
+      } catch (e) {
+        console.warn("Motion permission prompt note:", e);
+      }
+
+      permissionStatus.motion = "granted";
+      const motBadge = document.getElementById("perm-mot-state");
+      if (motBadge) { motBadge.textContent = "Granted"; motBadge.className = "quality-pill quality-excellent"; }
+
+      if (!motionListenersAttached) {
+        motionListenersAttached = true;
+        window.addEventListener("deviceorientation", (ev) => {
+          if (ev.alpha !== null || ev.beta !== null || ev.gamma !== null) {
+            motionState.alpha = ev.alpha !== null ? Number(ev.alpha.toFixed(1)) : null;
+            motionState.beta = ev.beta !== null ? Number(ev.beta.toFixed(1)) : null;
+            motionState.gamma = ev.gamma !== null ? Number(ev.gamma.toFixed(1)) : null;
+            motionState.compass_heading = ev.webkitCompassHeading !== undefined
+              ? Number(ev.webkitCompassHeading.toFixed(0))
+              : (ev.alpha !== null ? Number((360 - ev.alpha).toFixed(0)) : null);
+            motionState.updated_at = new Date().toISOString();
+            updateDiagnosticsTable();
+          }
+        }, true);
+
+        window.addEventListener("devicemotion", (ev) => {
+          const acc = ev.accelerationIncludingGravity || ev.acceleration;
+          if (acc && (acc.x !== null || acc.y !== null || acc.z !== null)) {
+            motionState.accel_x = acc.x !== null ? Number(acc.x.toFixed(2)) : null;
+            motionState.accel_y = acc.y !== null ? Number(acc.y.toFixed(2)) : null;
+            motionState.accel_z = acc.z !== null ? Number(acc.z.toFixed(2)) : null;
+            updateDiagnosticsTable();
+          }
+        }, true);
+      }
+      return true;
+    }
+
+    // 7. Wake Lock API
     async function requestWakeLock() {
+      const wlEl = document.getElementById("tel-wakelock");
       if ("wakeLock" in navigator) {
         try {
           wakeLock = await navigator.wakeLock.request("screen");
+          if (wlEl) wlEl.textContent = "Active (Screen Awake)";
         } catch (e) {
-          console.warn("Wake lock request failed", e);
+          if (wlEl) wlEl.textContent = "Supported (Standby)";
         }
+      } else {
+        if (wlEl) wlEl.textContent = "Not supported by browser";
       }
     }
 
     function releaseWakeLock() {
       if (wakeLock) {
-        wakeLock.release().then(() => wakeLock = null).catch(() => {});
+        wakeLock.release().then(() => {
+          wakeLock = null;
+          const wlEl = document.getElementById("tel-wakelock");
+          if (wlEl) wlEl.textContent = "Released";
+        }).catch(() => {});
       }
     }
 
-    // 5. GPS Streaming
+    // 8. Update Live Phone Diagnostics Table
+    function updateDiagnosticsTable() {
+      const elModel = document.getElementById("tel-model-os");
+      if (elModel) elModel.textContent = `${hardwareState.model} • ${hardwareState.os_family} ${hardwareState.os_version}`.trim();
+
+      const elBrowser = document.getElementById("tel-browser");
+      if (elBrowser) elBrowser.textContent = `${hardwareState.browser_family} ${hardwareState.browser_version}`.trim();
+
+      const elBat = document.getElementById("tel-battery");
+      if (elBat) {
+        if (batteryState.value !== null) {
+          elBat.textContent = `${batteryState.value}% (${batteryState.is_charging ? "⚡ Charging" : "🔋 Discharging"})`;
+        } else {
+          elBat.textContent = batteryState.reason || "Tap Allow Permissions";
+        }
+      }
+
+      const elNet = document.getElementById("tel-network");
+      if (elNet) {
+        const parts = [networkState.effective_type || (networkState.online ? "ONLINE" : "OFFLINE")];
+        if (networkState.downlink_mbps !== null) parts.push(`${networkState.downlink_mbps} Mbps`);
+        if (networkState.rtt_ms !== null) parts.push(`${networkState.rtt_ms} ms`);
+        elNet.textContent = parts.join(" • ");
+      }
+
+      const elMot = document.getElementById("tel-motion");
+      if (elMot) {
+        if (motionState.alpha !== null || motionState.beta !== null) {
+          elMot.textContent = `Hdg ${motionState.compass_heading ?? "--"}° | β:${motionState.beta ?? 0}° γ:${motionState.gamma ?? 0}°`;
+        } else {
+          elMot.textContent = permissionStatus.motion === "granted" ? "Active (Flat / Stationary)" : "Tap Allow Permissions";
+        }
+      }
+
+      const elAcc = document.getElementById("tel-accel");
+      if (elAcc) {
+        if (motionState.accel_x !== null) {
+          elAcc.textContent = `X:${motionState.accel_x} Y:${motionState.accel_y} Z:${motionState.accel_z} m/s²`;
+        } else {
+          elAcc.textContent = permissionStatus.motion === "granted" ? "Calibrating..." : "Tap Allow Permissions";
+        }
+      }
+
+      const elCpu = document.getElementById("tel-cpu-ram");
+      if (elCpu) {
+        const cores = hardwareState.cpu_cores ? `${hardwareState.cpu_cores} Cores` : "n/a";
+        const ram = hardwareState.device_memory_gb ? `${hardwareState.device_memory_gb} GB RAM` : "Standard RAM";
+        elCpu.textContent = `${cores} • ${ram}`;
+      }
+
+      const elStor = document.getElementById("tel-storage");
+      if (elStor) {
+        if (hardwareState.storage_quota_gb !== null) {
+          elStor.textContent = `${hardwareState.storage_used_mb ?? 0} MB used / ${hardwareState.storage_quota_gb} GB`;
+        } else {
+          elStor.textContent = "Protected / Standard";
+        }
+      }
+
+      const elScr = document.getElementById("tel-screen");
+      if (elScr) {
+        elScr.textContent = `${hardwareState.screen_res} • ${hardwareState.max_touch_points} touch pts`;
+      }
+    }
+
+    // 9. Sync Full Phone Telemetry to FleetWise Server (/api/driver/telemetry)
+    async function syncFullPhoneTelemetry() {
+      const chip = document.getElementById("sync-telemetry-chip");
+      const payload = {
+        device_id: deviceId,
+        driver_id: activeDriverId,
+        battery: batteryState,
+        network: networkState,
+        motion: motionState,
+        hardware: hardwareState,
+        permissions: permissionStatus,
+        timestamp: new Date().toISOString()
+      };
+      updateInspector();
+
+      try {
+        const res = await fetch("/api/driver/telemetry", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          if (chip) {
+            chip.textContent = "Synced Live";
+            chip.className = "quality-pill quality-excellent";
+          }
+        }
+      } catch (e) {
+        if (chip) {
+          chip.textContent = "Offline Queue";
+          chip.className = "quality-pill quality-fair";
+        }
+      }
+    }
+
+    // 10. Explicit One-Tap "Allow All Phone Permissions" Handler
+    async function requestAllPhonePermissions() {
+      const btnText = document.getElementById("btn-grant-text");
+      if (btnText) btnText.textContent = "Requesting Phone Permissions...";
+
+      await probeHardwareAndStorage();
+      probeNetworkConnection();
+      await requestBatteryTelemetry();
+      await requestMotionAndCompassPermission();
+      await requestWakeLock();
+
+      permissionStatus.full_device_access = true;
+      const summaryBadge = document.getElementById("perm-summary-badge");
+      if (summaryBadge) {
+        summaryBadge.textContent = "Permissions Active";
+        summaryBadge.className = "quality-pill quality-excellent";
+      }
+      if (btnText) btnText.textContent = "✅ Battery, GPS & Phone Sensors Permitted";
+
+      // Start GPS streaming automatically once permissions are granted
+      if (!isStreaming) {
+        startStreaming();
+      }
+      await syncFullPhoneTelemetry();
+    }
+
+    document.getElementById("btn-grant-all-permissions")?.addEventListener("click", () => {
+      requestAllPhonePermissions();
+    });
+
+    // 11. GPS Streaming
     const toggleBtn = document.getElementById("btn-toggle-stream");
     const streamStatus = document.getElementById("stream-status");
 
-    toggleBtn.addEventListener("click", () => {
+    toggleBtn.addEventListener("click", async () => {
       if (!isStreaming) {
-        startStreaming();
+        await requestAllPhonePermissions();
       } else {
         stopStreaming();
       }
@@ -419,17 +959,26 @@
       isStreaming = true;
       toggleBtn.className = "btn-action btn-stop";
       document.getElementById("btn-icon").textContent = "⏹";
-      document.getElementById("btn-text").textContent = "Stop Location Streaming";
+      document.getElementById("btn-text").textContent = "Stop Location & Telemetry Streaming";
       streamStatus.textContent = "STREAMING LIVE";
-      streamStatus.style.background = "rgba(16, 185, 129, 0.25)";
 
       requestWakeLock();
+
+      // Immediate first fix + continuous watchPosition
+      navigator.geolocation.getCurrentPosition(handleGeoSuccess, handleGeoError, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      });
 
       watchId = navigator.geolocation.watchPosition(
         handleGeoSuccess,
         handleGeoError,
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 }
       );
+
+      if (telemetryTimer) clearInterval(telemetryTimer);
+      telemetryTimer = setInterval(syncFullPhoneTelemetry, 8000);
     }
 
     function stopStreaming() {
@@ -438,22 +987,27 @@
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
       }
+      if (telemetryTimer) {
+        clearInterval(telemetryTimer);
+        telemetryTimer = null;
+      }
       releaseWakeLock();
 
       toggleBtn.className = "btn-action btn-start";
       document.getElementById("btn-icon").textContent = "▶";
-      document.getElementById("btn-text").textContent = "Start Location Streaming";
+      document.getElementById("btn-text").textContent = "Start Location & Phone Telemetry Streaming";
       streamStatus.textContent = "STANDBY";
-      streamStatus.style.background = "rgba(16, 185, 129, 0.15)";
     }
 
     function handleGeoSuccess(pos) {
+      permissionStatus.geolocation = "granted";
+      const gpsBadge = document.getElementById("perm-gps-state");
+      if (gpsBadge) { gpsBadge.textContent = "Granted"; gpsBadge.className = "quality-pill quality-excellent"; }
+
       const crd = pos.coords;
       const acc = crd.accuracy;
       document.getElementById("acc-val").textContent = "±" + acc.toFixed(1) + "m";
 
-      // 1. Raw Reported Accuracy Tiers (uncapped)
-      // Excellent <=5 m, Good <=15 m, Fair <=50 m, Poor <=100 m, Very poor >100 m
       let accTier = "Very poor";
       let tierClass = "quality-poor";
       if (acc <= 5) { accTier = "Excellent"; tierClass = "quality-excellent"; }
@@ -461,22 +1015,18 @@
       else if (acc <= 50) { accTier = "Fair"; tierClass = "quality-fair"; }
       else if (acc <= 100) { accTier = "Poor"; tierClass = "quality-poor"; }
 
-      // 2. Separate Quality Score S = 100 * exp(-acc / 50)
       const scoreS = Math.min(100, Math.max(0, 100 * Math.exp(-acc / 50))).toFixed(1);
-
-      // 3. Sigma and 95% radius (p = 0.68 assumption: divisor = 1.5096)
       const sigmaPos = acc / 1.509592;
       const r95 = (sigmaPos * 2.447747).toFixed(1);
-
-      // 4. Position Confidence at geofence radius (50m): C_pos(50) = 1 - exp(-50^2 / (2 * sigma^2))
-      const cPos50 = Math.round((1 - Math.exp(- (50 * 50) / (2 * sigmaPos * sigmaPos))) * 100);
+      const cPos50 = Math.round((1 - Math.exp(-(50 * 50) / (2 * sigmaPos * sigmaPos))) * 100);
 
       const accBadge = document.getElementById("acc-badge");
-      accBadge.innerHTML = `<span class="quality-pill ${tierClass}">${accTier}</span> <span style="font-size:11px; color:#94A3B8; margin-left:4px;">Score ${scoreS}/100 • 95% r: ${r95}m • ${cPos50}% in 50m</span>`;
+      accBadge.innerHTML = `<span class="quality-pill ${tierClass}">${accTier}</span> <span style="font-size:11px; color:var(--muted); margin-left:4px;">Score ${scoreS}/100 • 95% r: ${r95}m • ${cPos50}% in 50m</span>`;
 
       const spdKmh = crd.speed !== null && crd.speed >= 0 ? (crd.speed * 3.6).toFixed(1) : "0.0";
       document.getElementById("spd-val").textContent = spdKmh + " km/h";
-      document.getElementById("heading-val").textContent = crd.heading !== null ? "Hdg: " + crd.heading.toFixed(0) + "°" : "Hdg: --°";
+      const hdgVal = crd.heading !== null && !Number.isNaN(crd.heading) ? crd.heading : motionState.compass_heading;
+      document.getElementById("heading-val").textContent = hdgVal !== null && hdgVal !== undefined ? "Hdg: " + Number(hdgVal).toFixed(0) + "°" : "Hdg: --°";
 
       const payload = {
         session_id: activeSessionId,
@@ -490,44 +1040,48 @@
         altitude: crd.altitude,
         altitude_accuracy: crd.altitudeAccuracy,
         speed: crd.speed,
-        heading: crd.heading,
-        source: isDemoDriver ? "simulated" : "device",
-        device_timestamp: new Date(pos.timestamp).toISOString(),
-        battery: batteryState
+        heading: hdgVal !== null && hdgVal !== undefined ? Number(hdgVal) : crd.heading,
+        source: "device",
+        device_timestamp: new Date(pos.timestamp || Date.now()).toISOString(),
+        battery: batteryState,
+        device_telemetry: {
+          battery_pct: batteryState.value !== null ? batteryState.value + "%" : null,
+          battery_charging: batteryState.is_charging ? "⚡ Charging" : "🔋 Discharging",
+          network_type: networkState.effective_type,
+          downlink: networkState.downlink_mbps !== null ? `${networkState.downlink_mbps} Mbps` : null,
+          rtt: networkState.rtt_ms !== null ? `${networkState.rtt_ms} ms` : null,
+          motion: motionState,
+          hardware: hardwareState,
+          permissions: permissionStatus
+        }
       };
 
       lastFix = payload;
       updateInspector();
-
-      // Transmit to server
       transmitFix(payload);
     }
 
     function handleGeoError(err) {
       console.error("GPS Error:", err);
+      permissionStatus.geolocation = "denied";
+      const gpsBadge = document.getElementById("perm-gps-state");
+      if (gpsBadge) { gpsBadge.textContent = "Denied"; gpsBadge.className = "quality-pill quality-poor"; }
       document.getElementById("acc-val").textContent = "DENIED";
       document.getElementById("acc-badge").innerHTML = '<span class="quality-pill quality-poor">' + err.message + '</span>';
     }
 
     async function transmitFix(fix) {
-      const headers = {
-        "Content-Type": "application/json",
-        "x-device-id": deviceId
-      };
-      if (pairingToken) {
-        headers["x-pairing-token"] = pairingToken;
-      }
-
+      const headers = buildAuthHeaders({ "Content-Type": "application/json" });
       try {
         const url = `/tracking/location${pairingToken ? '?pair=' + encodeURIComponent(pairingToken) : ''}`;
         const res = await fetch(url, {
           method: "POST",
+          credentials: "same-origin",
           headers: headers,
           body: JSON.stringify(fix)
         });
 
         if (res.ok) {
-          // Flush any offline buffered fixes
           if (bufferedFixes.length > 0) {
             flushBuffer();
           }
@@ -554,7 +1108,8 @@
           const url = `/tracking/location${pairingToken ? '?pair=' + encodeURIComponent(pairingToken) : ''}`;
           await fetch(url, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "x-pairing-token": pairingToken, "x-device-id": deviceId },
+            credentials: "same-origin",
+            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(item)
           });
         } catch (e) {
@@ -566,7 +1121,7 @@
       document.getElementById("buffer-sub").textContent = bufferedFixes.length === 0 ? "Synced to cloud" : "Buffering offline";
     }
 
-    // 6. "What My Phone Shares" Transparency Inspector
+    // 12. "What My Phone Shares" Transparency Inspector
     const toggleJsonBtn = document.getElementById("toggle-json-btn");
     const jsonViewer = document.getElementById("json-viewer");
     const copyJsonBtn = document.getElementById("copy-json-btn");
@@ -579,28 +1134,33 @@
     });
 
     copyJsonBtn.addEventListener("click", () => {
-      if (lastFix) {
-        navigator.clipboard.writeText(JSON.stringify(lastFix, null, 2)).then(() => {
-          copyJsonBtn.textContent = "Copied!";
-          setTimeout(() => copyJsonBtn.textContent = "Copy JSON", 2000);
-        });
-      }
+      const txt = jsonViewer.textContent || "{}";
+      navigator.clipboard.writeText(txt).then(() => {
+        copyJsonBtn.textContent = "Copied!";
+        setTimeout(() => copyJsonBtn.textContent = "Copy JSON", 2000);
+      });
     });
 
     function updateInspector() {
-      if (lastFix) {
-        jsonViewer.textContent = JSON.stringify(lastFix, null, 2);
-      } else {
-        jsonViewer.textContent = JSON.stringify({
-          status: "Waiting for first GPS fix...",
-          battery_telemetry: batteryState,
-          device_id: deviceId,
-          pairing_token: pairingToken ? pairingToken.substring(0, 8) + "..." : "none"
-        }, null, 2);
-      }
+      const snapshot = lastFix || {
+        status: "Connected — Waiting for GPS stream",
+        driver_id: activeDriverId,
+        driver_name: activeDriverName,
+        device_id: deviceId,
+        battery: batteryState,
+        network: networkState,
+        motion: motionState,
+        hardware: hardwareState,
+        permissions: permissionStatus
+      };
+      jsonViewer.textContent = JSON.stringify(snapshot, null, 2);
     }
+
+    // Initialize passive diagnostics on load
+    probeHardwareAndStorage();
+    probeNetworkConnection();
+    requestBatteryTelemetry();
     updateInspector();
   </script>
 </body>
 </html>
-

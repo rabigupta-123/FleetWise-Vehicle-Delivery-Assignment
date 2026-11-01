@@ -176,6 +176,8 @@ class GPSLocationCreate(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=50)
     device_id: str | None = Field(default=None, max_length=50)
     driver_id: str | None = Field(default=None, max_length=50)
+    vehicle_id: str | None = Field(default=None, max_length=50)
+    delivery_id: str | None = Field(default=None, max_length=50)
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     accuracy: float = Field(..., ge=0.0)
@@ -185,6 +187,8 @@ class GPSLocationCreate(BaseModel):
     heading: float | None = Field(default=None, ge=0.0, le=360.0)
     source: str = Field(default="device", pattern="^(device|simulated)$")
     device_timestamp: str = Field(..., min_length=1)
+    battery: dict | None = None
+    device_telemetry: dict | None = None
 
     @field_validator("device_timestamp")
     @classmethod

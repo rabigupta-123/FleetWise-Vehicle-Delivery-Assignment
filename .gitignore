@@ -41,5 +41,7 @@ junit.xml
 
 # Scratch & temporary agent logs
 scratch/
+.tunnel_url
+
 
 

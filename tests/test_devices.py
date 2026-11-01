@@ -133,3 +133,74 @@ def test_device_negative_cases(client: TestClient, temp_db: str):
     assert res_bad_rev.status_code == 404
     assert res_bad_rev.json()["error"] == "NOT_FOUND"
 
+
+def test_driver_phone_full_telemetry_and_battery_permissions(client: TestClient, temp_db: str):
+    client.post("/drivers", json={"driver_id": "DR-PHONE-99", "name": "Phone Sensor Driver", "phone": "+91-9876500099"})
+
+    telemetry_payload = {
+        "device_id": "DEV-PHONE-99",
+        "driver_id": "DR-PHONE-99",
+        "battery": {
+            "value": 84,
+            "pct": "84%",
+            "status": "measured",
+            "is_charging": True,
+            "source": "BatteryManager",
+        },
+        "network": {
+            "online": True,
+            "effective_type": "5G",
+            "downlink_mbps": 45.2,
+            "rtt_ms": 22,
+        },
+        "motion": {
+            "compass_heading": 142,
+            "alpha": 218.0,
+            "beta": 12.5,
+            "gamma": -3.1,
+            "accel_x": 0.12,
+            "accel_y": 0.05,
+            "accel_z": 9.81,
+        },
+        "hardware": {
+            "model": "Pixel 9 Pro",
+            "os_family": "Android",
+            "os_version": "15",
+            "browser_family": "Chrome",
+            "browser_version": "131",
+            "cpu_cores": 8,
+            "device_memory_gb": 12,
+            "storage_used_mb": 420,
+            "storage_quota_gb": 128.0,
+            "screen_res": "412x915 @2.6x",
+            "max_touch_points": 10,
+        },
+        "permissions": {
+            "battery": "granted",
+            "geolocation": "granted",
+            "motion": "granted",
+            "hardware": "granted",
+            "full_device_access": True,
+        },
+    }
+
+    res = client.post("/api/driver/telemetry", json=telemetry_payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["device"]["device_id"] == "DEV-PHONE-99"
+    assert body["device"]["model"] == "Pixel 9 Pro"
+    assert body["device"]["capabilities"]["battery"]["value"] == 84
+    assert body["device"]["capabilities"]["network_type"] == "5G"
+    assert body["device"]["capabilities"]["permissions"]["full_device_access"] is True
+
+    # Verify /tracking/drivers/live returns the phone capabilities
+    live_res = client.get("/tracking/drivers/live")
+    assert live_res.status_code == 200
+    drv_entry = next(d for d in live_res.json()["drivers"] if d["driver_id"] == "DR-PHONE-99")
+    assert drv_entry["device"] is not None
+    assert drv_entry["device"]["model"] == "Pixel 9 Pro"
+    assert drv_entry["device"]["capabilities"]["battery"]["value"] == 84
+    assert drv_entry["device"]["capabilities"]["network_type"] == "5G"
+
+

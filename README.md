@@ -225,7 +225,7 @@ python scripts/run_dual_server.py
 ## 🧪 Test Suite & Quality Status
 
 <!-- BEGIN:TEST_COUNTS -->
-**88 Passed** / **88 Total** (100% pass rate)
+**89 Passed** / **89 Total** (100% pass rate)
 <!-- END:TEST_COUNTS -->
 
 ### Running the Complete Test & Quality Suite:
@@ -291,6 +291,7 @@ The following routes are generated directly from the running FastAPI application
 | `GET` | `/analytics/vehicles/{vehicle_id}` | Yes | `fleet_manager, ops_lead` | Detailed operational metrics and telemetry stats for a single vehicle. |
 | `GET` | `/api/csrf-token` | Yes | `ops_lead` | Issues or returns a per-session CSRF token for state-changing admin routes. |
 | `GET` | `/api/driver/session` | Yes | `ops_lead` | Returns authenticated driver profile, active vehicle/delivery assignment, |
+| `POST` | `/api/driver/telemetry` | Yes | `ops_lead` | Receives full smartphone sensor, battery, hardware, network, motion, and permission telemetry |
 | `GET` | `/api/pairing-tokens` | Yes | `ops_lead` | Lists recent pairing tokens and their binding status. |
 | `POST` | `/api/pairing-tokens` | Yes | `ops_lead` | Generates a >=128 bit cryptographic pairing token for phone driver telemetry access. |
 | `POST` | `/api/pairing-tokens/revoke-all` | Yes | `ops_lead` | Revokes all pairing tokens and driver sessions. |
