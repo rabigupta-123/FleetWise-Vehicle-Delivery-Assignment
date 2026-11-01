@@ -144,6 +144,7 @@ async def run_dual_servers(
 ):
     if share_mode:
         os.environ["FLEETWISE_SHARE_LAN"] = "1"
+    os.environ.setdefault("ENABLE_DEMO_ROUTES", "true")
 
     init_db()
     revoked_n = revoke_all_pairing_tokens()
